@@ -60,9 +60,9 @@ export const HAS_TWILIO = !!(TWILIO_CONFIG.accountSid && TWILIO_CONFIG.authToken
 
 export function assertEnvForProduction() {
   if (process.env.NODE_ENV === 'production') {
-    const miss = missingVars(['GOOGLE_APPLICATION_CREDENTIALS']);
-    if (miss.length) {
-      throw new Error(`[config] En producción se requiere: ${miss.join(', ')}`);
+    // Requires EITHER a file path OR the raw JSON credentials
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && !process.env.FIREBASE_ADMIN_CREDENTIALS) {
+      throw new Error(`[config] En producción se requiere: GOOGLE_APPLICATION_CREDENTIALS o FIREBASE_ADMIN_CREDENTIALS`);
     }
   }
 }
