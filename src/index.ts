@@ -21,16 +21,21 @@ const port = PORT;
 app.set('trust proxy', 1); 
 
 const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:5173'];
-const allowedOrigins = (process.env.CORS_ORIGIN
+const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
-  : defaultCorsOrigins
-).filter(Boolean);
+  : defaultCorsOrigins;
 
 const corsOptions: cors.CorsOptions = {
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+  origin: (origin, callback) => {
+    // Permitir solicitudes sin origen (como Postman o curl)
+    if (!origin) return callback(null, true);
+    
+    // Permitir si el origen está en la lista permitida o si se permite todo ('*')
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+    
+    console.warn(`[CORS] Bloqueado origen: ${origin}`);
     return callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
