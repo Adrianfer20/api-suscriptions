@@ -62,6 +62,17 @@ class CommunicationsController {
         return res.status(500).json({ ok: false, message: err?.message || 'Failed to fetch conversations' });
     }
   }
+
+  async markAsRead(req: Request, res: Response) {
+    try {
+        const { clientId } = req.params;
+        if (!clientId) return res.status(400).json({ ok: false, message: 'clientId required' });
+        await communicationsService.markAsRead(String(clientId));
+        return res.json({ ok: true });
+    } catch (err: any) {
+        return res.status(500).json({ ok: false, message: err?.message || 'Failed to mark as read' });
+    }
+  }
 }
 
 const communicationsController = new CommunicationsController();

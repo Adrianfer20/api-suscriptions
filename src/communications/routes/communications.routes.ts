@@ -56,4 +56,14 @@ router.get(
   (req: Request, res: Response) => communicationsController.getMessages(req, res)
 );
 
+// POST /communications/conversations/:clientId/read (Admin/Staff)
+router.post(
+  '/conversations/:clientId/read',
+  authenticate,
+  requireRole('admin', 'staff'),
+  [param('clientId').isString().notEmpty()],
+  validateRequest,
+  (req: Request, res: Response) => communicationsController.markAsRead(req, res)
+);
+
 export default router;

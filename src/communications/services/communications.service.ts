@@ -360,6 +360,50 @@ class CommunicationsService {
         ...(doc.data() as any)
     })).filter(c => c.lastMessageAt);
   }
+
+  async markAsRead(clientIdOrUid: string) {
+    if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    
+    // Resolve client
+    let docId = clientIdOrUid;
+    let clientDoc = await this.clientsCollection().doc(clientIdOrUid).get();
+    
+    if (!clientDoc.exists) {
+       const q = await this.clientsCollection().where('uid', '==', clientIdOrUid).limit(1).get();
+       if (!q.empty) {
+         clientDoc = q.docs[0];
+       }
+    }
+    
+    if (!clientDoc.exists) {
+       // Silent fail or throw? Throw is better for API response
+       throw new Error('Client not found');
+    }
+    
+    docId = clientDoc.id;
+
+    // 1. Reset client unread count
+    await this.clientsCollection().doc(docId).update({ unreadCount: 0 });
+
+    // 2. Mark specific messages as read (limit 500 per batch)
+    // Query inbound 'received' messages for this client
+    const unreadSnap = await this.messagesCollection()
+      .where('clientId', '==', docId)
+      .where('direction', '==', 'inbound')
+      .where('status', '==', 'received')
+      .limit(500) 
+      .get();
+      
+    if (!unreadSnap.empty) {
+        const batch = firebaseAdmin.firestore().batch();
+        unreadSnap.docs.forEach((doc: firestore.QueryDocumentSnapshot) => {
+            batch.update(doc.ref, { status: 'read' });
+        });
+        await batch.commit();
+    }
+
+    return { ok: true, clientId: docId };
+  }
 }
 
 const communicationsService = new CommunicationsService();
