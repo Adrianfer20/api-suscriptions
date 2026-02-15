@@ -17,6 +17,9 @@ import { startDailyAutomationJob } from './automation/jobs/daily.job';
 const app = express();
 const port = PORT;
 
+// Confía en el proxy de Railway (necesario para rate-limit y obtener la IP correcta)
+app.set('trust proxy', 1); 
+
 const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:5173'];
 const allowedOrigins = (process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
@@ -39,6 +42,7 @@ const corsOptions: cors.CorsOptions = {
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true })); // Necesario para Webhooks de Twilio
 
 // Basic rate limiter (global)
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 100 });
