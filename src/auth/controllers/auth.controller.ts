@@ -36,4 +36,43 @@ export const getUserByUid = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-export default { createUser, me, getUserByUid };
+export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { uid } = req.params;
+    const { email, password, displayName, role, disabled } = req.body;
+    
+    // Basic validation
+    if (role && !['admin', 'staff', 'client', 'guest'].includes(role)) {
+       return res.status(400).json({ ok: false, message: 'Invalid role' });
+    }
+
+    const updatedUser = await authService.updateUser(uid, { email, password, displayName, role, disabled });
+    return res.json({ ok: true, data: updatedUser });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || 'Failed to update user' });
+  }
+};
+
+export const listUsers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const pageToken = req.query.pageToken as string | undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : 20;
+    
+    const result = await authService.listUsers(pageToken, limit);
+    return res.json({ ok: true, data: result });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || 'Failed to list users' });
+  }
+};
+
+export const deleteUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { uid } = req.params;
+    await authService.deleteUser(uid);
+    return res.json({ ok: true, message: 'User deleted successfully' });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || 'Failed to delete user' });
+  }
+};
+
+export default { createUser, me, getUserByUid, updateUser, listUsers, deleteUser };

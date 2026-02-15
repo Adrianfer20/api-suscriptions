@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
-import rateLimit from 'express-rate-limit';
 import validateRequest from '../middlewares/validateRequest';
 import authController from '../controllers/auth.controller';
 import authenticate from '../middlewares/authenticate';
@@ -27,5 +26,14 @@ router.get('/me', authenticate, authController.me);
 
 // GET /auth/user/:uid (requires authentication)
 router.get('/user/:uid', authenticate, authController.getUserByUid);
+
+// PATCH /auth/user/:uid (admin only) - Update user (role, email, pass, name)
+router.patch('/user/:uid', authenticate, requireRole('admin'), authController.updateUser);
+
+// DELETE /auth/user/:uid (admin only) - Delete user
+router.delete('/user/:uid', authenticate, requireRole('admin'), authController.deleteUser);
+
+// GET /auth/users (admin only) - List users
+router.get('/users', authenticate, requireRole('admin'), authController.listUsers);
 
 export default router;

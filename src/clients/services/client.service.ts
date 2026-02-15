@@ -55,6 +55,23 @@ class ClientService {
     const doc = await this.collection().doc(id).get();
     return { id: doc.id, ...(doc.data() as any) } as Client;
   }
+
+  async deleteByUid(uid: string) {
+      if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+      const snap = await this.collection().where('uid', '==', uid).get();
+      if (snap.empty) return null;
+      
+      const batch = firebaseAdmin.firestore().batch();
+      const clientIds: string[] = [];
+      
+      snap.docs.forEach(doc => {
+          clientIds.push(doc.id);
+          batch.delete(doc.ref);
+      });
+      
+      await batch.commit();
+      return clientIds;
+  }
 }
 
 const clientService = new ClientService();

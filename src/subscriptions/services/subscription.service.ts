@@ -95,6 +95,18 @@ class SubscriptionService {
     const updated = await docRef.get();
     return { id: updated.id, ...(updated.data() as any) } as Subscription;
   }
+
+  async deleteByClientId(clientId: string) {
+      if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+      const snap = await this.collection().where('clientId', '==', clientId).get();
+      if (snap.empty) return;
+
+      const batch = firebaseAdmin.firestore().batch();
+      snap.docs.forEach(doc => {
+          batch.delete(doc.ref);
+      });
+      await batch.commit();
+  }
 }
 
 const subscriptionService = new SubscriptionService();

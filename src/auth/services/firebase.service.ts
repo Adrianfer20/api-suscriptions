@@ -56,6 +56,41 @@ class FirebaseService implements IFirebaseService {
     };
     return user;
   }
+
+  async updateUser(uid: string, data: { email?: string; password?: string; displayName?: string; disabled?: boolean }): Promise<void> {
+    if (!firebaseAdmin) {
+      throw new Error('Firebase Admin not initialized');
+    }
+    // Remove undefined keys
+    const updateData = Object.fromEntries(Object.entries(data).filter(([_, v]) => v !== undefined));
+    await firebaseAdmin.auth().updateUser(uid, updateData);
+  }
+
+  async listUsers(nextPageToken?: string, maxResults = 50): Promise<{ users: AuthUser[]; pageToken?: string }> {
+    if (!firebaseAdmin) {
+      throw new Error('Firebase Admin not initialized');
+    }
+    const result = await firebaseAdmin.auth().listUsers(maxResults, nextPageToken);
+    
+    const users: AuthUser[] = result.users.map((u) => {
+        const claims = (u.customClaims || {}) as Record<string, unknown>;
+        return {
+            uid: u.uid,
+            email: u.email,
+            name: u.displayName || undefined,
+            role: typeof claims['role'] === 'string' ? (claims['role'] as Role) : undefined
+        };
+    });
+
+    return { users, pageToken: result.pageToken };
+  }
+
+  async deleteUser(uid: string): Promise<void> {
+    if (!firebaseAdmin) {
+      throw new Error('Firebase Admin not initialized');
+    }
+    await firebaseAdmin.auth().deleteUser(uid);
+  }
 }
 
 const firebaseService = new FirebaseService();
