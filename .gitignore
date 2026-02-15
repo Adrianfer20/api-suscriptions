@@ -12,5 +12,6 @@ starlink-suscription-firebase-adminsdk-*.json
 # Ensure .env.example is allowed
 !.env.example
 
-
 src/config/firebase.json
+config/firebase.json
+node_modules

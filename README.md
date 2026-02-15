@@ -2,272 +2,133 @@
 
 Backend modular en TypeScript para gestionar clientes, suscripciones y comunicaciones, con automatizaciones diarias basadas en reglas de negocio. Integra Firebase Admin (Auth + Firestore) y Twilio (WhatsApp) para notificaciones operativas.
 
-## 1) Descripcion general
+## 1. Descripción General
 
 Esta API permite:
+- **Gestión de Clientes:** Crear, listar y actualizar información de clientes.
+- **Gestión de Suscripciones:** Crear nuevas suscripciones, listar, ver detalles y renovar suscripciones manualmente.
+- **Comunicaciones:** Enviar mensajes de plantilla (WhatsApp Template) y mensajes de texto libre, así como consultar el historial de conversaciones.
+- **Automatización:** Ejecutar trabajos diarios para verificar vencimientos y enviar recordatorios automáticamente.
 
-- Administrar clientes y suscripciones.
-- Renovar suscripciones y marcar inactivas cuando llega la fecha de corte.
-- Enviar comunicaciones automatizadas via WhatsApp.
-- Ejecutar un job diario que evalua reglas de suscripcion.
+## 2. Tecnologías Utilizadas
 
-Proposito: centralizar la gestion operativa de suscripciones y automatizar procesos repetitivos.
-Problema que resuelve: reduce trabajo manual, evita errores y estandariza la comunicacion con clientes.
+- **Core:** Node.js, Express, TypeScript
+- **Base de Datos & Auth:** Firebase Admin SDK (Auth + Firestore)
+- **Mensajería:** Twilio (WhatsApp)
+- **Validación:** Zod (schemas), express-validator
+- **Seguridad:** helmet, cors, rate-limit, autenticación por token (Bearer)
+- **Tareas Programadas:** node-cron
 
-## 2) Tecnologias utilizadas
+## 3. Configuración e Instalación
 
-- Node.js + Express (API REST)
-- TypeScript
-- Firebase Admin SDK (Auth + Firestore)
-- Twilio (WhatsApp)
-- Zod (validacion de clients y subscriptions)
-- express-validator (validacion en auth y communications)
-- helmet, cors, express-rate-limit (seguridad basica)
-- node-cron (automatizacion diaria)
+1.  Clonar el repositorio.
+2.  Instalar dependencias: `npm install`
+3.  Configurar variables de entorno en `.env` (puerto, credenciales de Firebase, Twilio, etc.).
+4.  Colocar las credenciales de servicio de Firebase en `config/firebase.json` (o configurar via variables de entorno).
 
-## 3) Arquitectura
+## 4. Autenticación y Seguridad
 
-### Estructura de carpetas
+La mayoría de los endpoints están protegidos y requieren un token de Firebase Authentication.
+- **Header:** `Authorization: Bearer <ID_TOKEN>`
+- **Roles:** El sistema maneja roles en los Custom Claims del usuario (`admin`, `staff`, `client`).
+    - `admin`: Acceso total.
+    - `staff`: Acceso limitado (principalmente comunicaciones).
+    - `client`: Acceso restringido a sus propios datos (actualmente limitado).
 
-```
-src/
-   auth/           # autenticacion, roles, middlewares
-   clients/        # CRUD de clientes
-   subscriptions/  # suscripciones y renovaciones
-   communications/ # envio de mensajes y plantillas
-   automation/     # job diario y reglas
-   config/         # firebase, twilio, env
-   middlewares/    # validadores y error handler
-```
+## 5. Referencia de API
 
-### Patron controller/service
+### Health Check
+- **`GET /`**
+  - **Uso:** Verificar el estado del servicio y las conexiones externas.
+  - **Respuesta:**
+    ```json
+    {
+      "status": "ok",
+      "firebaseClient": "initialized",
+      "firebaseAdmin": "admin-initialized",
+      "twilio": "available"
+    }
+    ```
 
-- Controllers: reciben request, validan input, llaman al service.
-- Services: contienen la logica de negocio.
-- Firestore: acceso desde services, nunca desde controllers.
+### Autenticación (`/auth`)
+- **`POST /auth/create`** (Admin)
+  - **Body:** `{ "email": "user@mail.com", "password": "pass", "role": "admin|staff|client", "displayName": "Name" }`
+  - **Respuesta:** `{ "ok": true, "uid": "...", "role": "..." }`
+- **`GET /auth/me`** (Auth required)
+  - **Uso:** Obtener información del usuario actual.
+- **`GET /auth/user/:uid`** (Auth required)
+  - **Uso:** Obtener información pública básica de un usuario por UID.
 
-## 4) Autenticacion y roles
+### Clientes (`/clients`)
+Gestionado por administradores.
+- **`POST /clients`**
+  - **Body:** `{ "uid": "firebase-uid", "name": "Nombre", "phone": "+52...", "address": "..." }`
+  - **Respuesta:** `{ "ok": true, "data": { ...client } }`
+- **`GET /clients`**
+  - **Query:** `limit` (número), `startAfter` (cursor para paginación).
+  - **Respuesta:** Lista de clientes.
+- **`GET /clients/:id`**
+  - **Uso:** Obtener detalle de un cliente.
+- **`PATCH /clients/:id`**
+  - **Body:** Campos a actualizar (`name`, `phone`, `address`).
 
-- Autenticacion mediante Firebase ID Token.
-- Roles definidos en custom claims: `admin`, `staff`, `client`, `guest`.
-- Middlewares:
-   - `authenticate` valida token
-   - `requireRole` restringe rutas
+### Suscripciones (`/subscriptions`)
+Gestionado por administradores.
+- **`POST /subscriptions`**
+  - **Body:** 
+    ```json
+    {
+      "clientId": "client-id",
+      "startDate": "YYYY-MM-DD",
+      "cutDate": "YYYY-MM-DD",
+      "plan": "Plan Name",
+      "amount": "$100.00"
+    }
+    ```
+- **`GET /subscriptions`**
+  - **Query:** `limit`, `startAfter`.
+- **`GET /subscriptions/:id`**
+  - **Uso:** Ver detalles de una suscripción.
+- **`POST /subscriptions/:id/renew`**
+  - **Uso:** Renovar una suscripción manualmente (extiende la fecha de corte).
 
-### Roles y permisos
+### Comunicaciones (`/communications`)
+- **`POST /communications/send-template`** (Admin)
+  - **Body:** `{ "clientId": "...", "template": "nombre_plantilla" }`
+  - **Uso:** Enviar mensajes pre-aprobados por WhatsApp (inicio de conversación).
+- **`POST /communications/send`** (Admin/Staff)
+  - **Body:** `{ "clientId": "...", "body": "Texto libre..." }`
+  - **Uso:** Enviar respuesta de texto libre (solo dentro de la ventana de 24h).
+- **`GET /communications/conversations`** (Admin/Staff)
+  - **Uso:** Listar conversaciones activas.
+- **`GET /communications/messages/:clientId`**
+  - **Uso:** Ver historial de mensajes con un cliente específico.
+- **`POST /communications/webhook`**
+  - **Uso:** Endpoint público para recibir eventos de Twilio (mensajes entrantes).
 
-| Accion | Admin | Cliente |
-| --- | --- | --- |
-| Crear clientes | ✔ | ✖ |
-| Editar clientes | ✔ | ✖ |
-| Crear suscripciones | ✔ | ✖ |
-| Renovar suscripciones | ✔ | ✖ |
-| Ver sus propios datos | ✔ | ✔ |
-| Cambiar su propia clave | ✖ | ✔ |
+### Automatización (`/automation`)
+- **`POST /automation/run-daily`** (Admin)
+  - **Query:** `?dryRun=true` (opcional, para simular sin ejecutar cambios).
+  - **Body:** `{ "reason": "manual-check" }` (opcional).
+  - **Uso:** Ejecutar manualmente el job diario que verifica vencimientos y envía recordatorios.
 
-Nota: el backend actual expone rutas administrativas; no existen endpoints self-service para cliente.
-
-## 5) Endpoints
-
-### Health
-
-**GET /**
-
-```json
-{
-   "status": "ok",
-   "firebaseClient": "not-initialized",
-   "firebaseAdmin": "admin-initialized",
-   "twilio": "available"
-}
-```
-
-### Auth
-
-**POST /auth/create** (admin)
-
-```json
-{
-   "email": "user@ejemplo.com",
-   "password": "secret123",
-   "displayName": "Nombre",
-   "role": "client"
-}
-```
-
-**GET /auth/me** (autenticado)
-
-### Clients (solo admin)
-
-**POST /clients**
-
-```json
-{
-   "uid": "firebaseUID",
-   "name": "Juan Perez",
-   "phone": "+584123456789",
-   "address": "Calle 1"
-}
-```
-
-**GET /clients** (paginacion: `limit`, `startAfter`)
-
-**GET /clients/:id**
-
-**PATCH /clients/:id** (whitelist)
-
-### Subscriptions (solo admin)
-
-**POST /subscriptions**
-
-```json
-{
-   "clientId": "firebaseUID",
-   "startDate": "2026-02-11",
-   "cutDate": "2026-03-11",
-   "plan": "starlink-basic",
-   "amount": "$50"
-}
-```
-
-- `startDate`: fecha de inicio del servicio/activación. Si es futura, el estado será `pending`; al llegar la fecha, un job diario la activa automáticamente.
-- `cutDate`: fecha de corte del servicio. Al llegar este día, si no se ha renovado, el sistema corta el servicio (`inactive`) y notifica al cliente.
-
-**GET /subscriptions** (paginacion: `limit`, `startAfter`)
-
-**GET /subscriptions/:id**
-
-**POST /subscriptions/:id/renew**
-
-Nota: no existe PATCH general para suscripciones.
-
-### Communications
-
-**POST /communications/send** (admin)
-
-```json
-{
-   "clientId": "firebaseUID",
-   "template": "subscription_cutoff_day_2v"
-}
-```
-
-**GET /communications/messages/:clientId**
-
-### Automation
-
-**POST /automation/run-daily** (admin)
-
-## 6) Modelos de datos
-
-### Client
-
-| Campo | Tipo | Descripcion |
-| --- | --- | --- |
-| uid | string | UID de Firebase |
-| name | string | Nombre del cliente |
-| phone | string | Telefono E.164 |
-| address | string | Direccion |
-| createdAt | timestamp | Auto |
-| updatedAt | timestamp | Auto |
+## 6. Modelos de Datos (Resumen)
 
 ### Subscription
+- **Estado:** `active`, `inactive`, `past_due`, `cancelled`.
+- **Fechas:** Formato ISO `YYYY-MM-DD` para `startDate` y `cutDate`.
+- **Amount:** Cadena con formato moneda (ej. `$50.00`).
 
-| Campo | Tipo | Descripcion |
-| --- | --- | --- |
-| clientId | string | ID del cliente |
-| startDate | string | ISO YYYY-MM-DD |
-| cutDate | string | ISO YYYY-MM-DD |
-| plan | string | Nombre del plan |
-| amount | string | Monto con moneda (ej. $50) |
-| status | enum | active, pending, suspended, inactive |
-| createdAt | timestamp | Auto |
-| updatedAt | timestamp | Auto |
+### Client
+- **Phone:** Formato E.164 (ej. `+521234567890`).
 
-### Message
+## 7. Manejo de Errores
 
-| Campo | Tipo |
-| --- | --- |
-| clientId | string |
-| template | string |
-| body | string |
-| to | string |
-| status | queued/sent/failed |
-| twilioSid | string |
-| error | string |
-
-## 7) Plantillas WhatsApp (Twilio)
-
-Templates permitidos (allowlist):
-
-- `subscription_reminder_3days_2v` (variables: `name`, `dueDate`)
-- `subscription_suspended_notice_2v` (variables: `name`, `subscriptionLabel`)
-- `subscription_cutoff_day_2v` (variables: `name`, `subscriptionLabel`, `cutoffDate`)
-
-Nota: el endpoint `/communications/send` solo recibe `clientId` y `template`. Las variables adicionales se usan desde flujos internos (por ejemplo automation).
-
-## 8) Reglas de negocio
-
-- Campos criticos de suscripcion no se modifican por PATCH.
-- `status` se calcula en el service al crear: `pending` si `startDate` es futura, si no `active`.
-- Renovacion incrementa `cutDate` en +1 mes con zona horaria fija.
-- Automation marca `inactive` cuando `cutDate` llega o supera la fecha actual.
-- Fechas con TZ fija via `AUTOMATION_TZ` (default `America/Caracas` en util de suscripciones).
-
-## 9) Instalacion y configuracion
-
-Variables de entorno principales:
-
+Las respuestas de error siguen el formato:
+```json
+{
+  "ok": false,
+  "message": "Descripción del error",
+  "errors": [] // Opcional, detalles de validación
+}
 ```
-PORT=3000
-NODE_ENV=development
-GOOGLE_APPLICATION_CREDENTIALS=./config/firebase.json
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_FROM_NUMBER=
-CORS_ORIGIN=http://localhost:5173
-AUTOMATION_CRON=0 8 * * *
-AUTOMATION_TZ=America/Caracas
-AUTOMATION_JOB_DISABLED=false
-```
-
-Tambien puedes permitir varios origenes separando por coma, por ejemplo:
-
-```env
-CORS_ORIGIN=http://localhost:5173,http://localhost:3000
-```
-
-Instalacion:
-
-```bash
-npm install
-npm run dev
-```
-
-## 10) Ejemplos de uso
-
-Crear cliente:
-
-```bash
-curl -X POST http://localhost:3000/clients \
-   -H "Authorization: Bearer $TOKEN" \
-   -H "Content-Type: application/json" \
-   -d '{"uid":"firebaseUID","name":"Juan Perez"}'
-```
-
-Crear suscripcion:
-
-```bash
-curl -X POST http://localhost:3000/subscriptions \
-   -H "Authorization: Bearer $TOKEN" \
-   -H "Content-Type: application/json" \
-   -d '{"clientId":"firebaseUID","startDate":"2026-02-11","cutDate":"2026-03-11","plan":"starlink-basic","amount":"$50","billingDate":"2026-02-08"}'
-```
-
-## 11) Notas
-
-- Automation genera logs en `automationLogs`.
-- CORS configurable por entorno (`CORS_ORIGIN`).
-- Paginacion basada en cursor (`startAfter`).
-
-Rate limiting por ruta sensible.

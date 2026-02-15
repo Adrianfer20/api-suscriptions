@@ -41,6 +41,17 @@ const corsOptions: cors.CorsOptions = {
 // Middlewares
 app.use(helmet());
 app.use(cors(corsOptions));
+
+// Health/status - Moved up to avoid body-parser timeouts on health checks
+app.get('/', (req, res) => {
+  return res.json({
+    status: 'ok',
+    firebaseClient: firebaseApp ? 'initialized' : 'not-initialized',
+    firebaseAdmin: firebaseAdmin ? 'admin-initialized' : 'admin-not-initialized',
+    twilio: twilioClient ? 'available' : 'not-configured'
+  });
+});
+
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true })); // Necesario para Webhooks de Twilio
 
@@ -68,16 +79,6 @@ if (process.env.NODE_ENV === 'development') {
     next();
   });
 }
-
-// Health/status
-app.get('/', (req, res) => {
-  return res.json({
-    status: 'ok',
-    firebaseClient: firebaseApp ? 'initialized' : 'not-initialized',
-    firebaseAdmin: firebaseAdmin ? 'admin-initialized' : 'admin-not-initialized',
-    twilio: twilioClient ? 'available' : 'not-configured'
-  });
-});
 
 // Mount auth module
 app.use('/auth', authRoutes);

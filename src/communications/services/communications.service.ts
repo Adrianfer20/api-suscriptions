@@ -73,6 +73,7 @@ class CommunicationsService {
       if (!q.empty) clientDoc = q.docs[0];
     }
     if (!clientDoc || !clientDoc.exists) throw new Error('Client not found');
+    const resolvedClientId = clientDoc.id;
     const client = clientDoc.data() as any;
     const toPhone = client.phone;
     if (!toPhone) throw new Error('Client has no phone number');
@@ -91,7 +92,7 @@ class CommunicationsService {
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
 
     const base: Partial<Message> = {
-      clientId,
+      clientId: resolvedClientId,
       template: templateName,
       body: '',
       to: toPhone,
@@ -105,7 +106,7 @@ class CommunicationsService {
     const docRef = await this.messagesCollection().add(base);
 
     // Update client conversation metadata
-    await this.clientsCollection().doc(clientId).update({
+    await this.clientsCollection().doc(resolvedClientId).update({
         lastMessageAt: now,
         lastMessageBody: `Template: ${templateName}`,
         lastMessageDir: 'outbound'
@@ -158,6 +159,7 @@ class CommunicationsService {
       if (!q.empty) clientDoc = q.docs[0];
     }
     if (!clientDoc || !clientDoc.exists) throw new Error('Client not found');
+    const resolvedClientId = clientDoc.id;
     const client = clientDoc.data() as any;
     const toPhone = client.phone;
     if (!toPhone) throw new Error('Client has no phone number');
@@ -166,7 +168,7 @@ class CommunicationsService {
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
 
     const base: Partial<Message> = {
-      clientId,
+      clientId: resolvedClientId,
       body,
       to: toPhone,
       direction: 'outbound',
@@ -177,7 +179,7 @@ class CommunicationsService {
 
     const docRef = await this.messagesCollection().add(base);
 
-    await this.clientsCollection().doc(clientId).update({
+    await this.clientsCollection().doc(resolvedClientId).update({
         lastMessageAt: now,
         lastMessageBody: body,
         lastMessageDir: 'outbound'
@@ -220,8 +222,42 @@ class CommunicationsService {
     }
   }
 
-  async getMessagesByClient(clientId: string, limit?: number, startAfterId?: string) {
-    let query: any = this.messagesCollection().where('clientId', '==', clientId).orderBy('createdAt', 'desc');
+  async getMessagesByClient(clientIdOrUid: string, limit?: number, startAfterId?: string) {
+    // Resolve client to get both Doc ID and UID
+    let docId = clientIdOrUid;
+    let uid = clientIdOrUid;
+    
+    // Check if it's a doc ID
+    let clientDoc = await this.clientsCollection().doc(clientIdOrUid).get();
+    
+    // If not found, check if it is a UID
+    if (!clientDoc.exists) {
+       const q = await this.clientsCollection().where('uid', '==', clientIdOrUid).limit(1).get();
+       if (!q.empty) {
+         clientDoc = q.docs[0];
+       }
+    }
+
+    if (clientDoc.exists) {
+       docId = clientDoc.id;
+       const data = clientDoc.data() as any;
+       uid = data.uid || 'unknown';
+    }
+
+    // Query for messages matching either Doc ID or UID to support legacy data
+    const candidates = Array.from(new Set([docId, uid])).filter(x => x !== 'unknown');
+    
+    // NOTE: 'in' query supports up to 10 values.
+    // We also need composite index on 'clientId' + 'createdAt'
+    // BUT 'in' queries with orderBy might require specific index configuration or client-side merging.
+    // Firestore 'in' matches ANY of the values. 
+    // However, if we simply use 'where clientId == resolvedDocId', we fix the main issue (inbound messages).
+    // If we want to support legacy outbound messages (stored with UID), 'in' is better.
+    
+    let query: any = this.messagesCollection()
+      .where('clientId', 'in', candidates)
+      .orderBy('createdAt', 'desc');
+
     if (startAfterId) {
       const cursorDoc = await this.messagesCollection().doc(startAfterId).get();
       if (!cursorDoc.exists) {
@@ -230,8 +266,21 @@ class CommunicationsService {
       query = query.startAfter(cursorDoc);
     }
     if (limit && Number.isInteger(limit) && limit > 0) query = query.limit(limit);
-    const snaps = await query.get();
-    return snaps.docs.map((d: firestore.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) } as Message));
+    
+    try {
+      const snaps = await query.get();
+      return snaps.docs.map((d: firestore.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) } as Message));
+    } catch (e: any) {
+        // Fallback: if 'in' query fails (index missing), try querying by Doc ID only (the correct way forward)
+        // This handles cases where index isn't updated for 'in' operator immediately.
+        console.warn('Composite query failed, falling back to Doc ID only', e);
+        const fallbackQuery = this.messagesCollection()
+             .where('clientId', '==', docId)
+             .orderBy('createdAt', 'desc')
+             .limit(limit || 20);
+        const snaps = await fallbackQuery.get();
+        return snaps.docs.map((d: firestore.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) } as Message));
+    }
   }
 
   async receive(payload: any) {

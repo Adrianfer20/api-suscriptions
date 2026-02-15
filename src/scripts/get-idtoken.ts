@@ -6,7 +6,7 @@ import firebaseAdmin from '../config/firebaseAdmin';
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 // Usage example:
-// npx ts-node src/scripts/get-idtoken.ts --email "adrian@gmail.com" --password "12345678"
+// npx ts-node src/scripts/get-idtoken.ts --email "adrian@email.com" --password "12345678"
 
 type Args = {
   email?: string;
