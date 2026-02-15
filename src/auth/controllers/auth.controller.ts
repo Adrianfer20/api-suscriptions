@@ -38,7 +38,7 @@ export const getUserByUid = async (req: Request, res: Response, next: NextFuncti
 
 export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { uid } = req.params;
+    const { uid } = req.params as { uid: string };
     const { email, password, displayName, role, disabled } = req.body;
     
     // Basic validation
@@ -67,7 +67,7 @@ export const listUsers = async (req: Request, res: Response, next: NextFunction)
 
 export const deleteUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { uid } = req.params;
+    const { uid } = req.params as { uid: string };
     await authService.deleteUser(uid);
     return res.json({ ok: true, message: 'User deleted successfully' });
   } catch (err: any) {
