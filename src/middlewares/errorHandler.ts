@@ -15,6 +15,12 @@ if (process.env.SENTRY_DSN) {
 }
 
 export default function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
+  // Ignorar errores de conexión interrumpida (comunes en health checks o desconexiones de clientes)
+  if (err?.type === 'entity.parse.failed' || err?.message === 'request aborted' || err?.code === 'ECONNABORTED') {
+     console.warn(`[client-error] Connection aborted or bad request: ${err.message}`);
+     return; // No devolver respuesta ya que la conexión se cerró
+  }
+
   // Log details server-side
   console.error('[error]', err && err.stack ? err.stack : err);
   if (Sentry) {
