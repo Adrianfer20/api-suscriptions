@@ -6,7 +6,7 @@ async function main() {
   const clientId = process.argv[2] || 'client-test-1';
   const template = process.argv[3] || 'subscription_cutoff_day_2v';
   try {
-    const res = await communicationsService.send(clientId, template, {
+    const res = await communicationsService.sendTemplate(clientId, template, {
       subscriptionLabel: 'Starlink Basic',
       cutoffDate: '2026-03-01'
     });
