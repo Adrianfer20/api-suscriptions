@@ -7,8 +7,10 @@ starlink-suscription-firebase-adminsdk-*.json
 *.firebase-adminsdk-*.json
 
 # Ignore moved service account and local config
-config/firebase.json
-config/secrets.json
+./src/config/firebase.json
 
 # Ensure .env.example is allowed
 !.env.example
+
+
+src/config/firebase.json
