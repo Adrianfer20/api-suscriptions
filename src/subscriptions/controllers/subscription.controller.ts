@@ -49,6 +49,16 @@ class SubscriptionController {
     }
   }
 
+  async delete(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      await subscriptionService.delete(id);
+      return res.status(200).json({ ok: true, message: 'Subscription deleted' });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, message: 'Unable to delete subscription' });
+    }
+  }
+
   async renew(req: Request, res: Response) {
     try {
       const id = String(req.params.id);

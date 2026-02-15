@@ -21,9 +21,10 @@ describe('/subscriptions endpoints (unauthenticated)', () => {
     expect(res.body).to.have.property('ok', false);
   });
 
-  it('PATCH /subscriptions/:id should return 404 when route is not available', async () => {
+  it('PATCH /subscriptions/:id should return 401 when Authorization missing', async () => {
     const res = await request(app).patch('/subscriptions/abc123').send({ cutDate: '2026-04-11' });
-    expect(res.status).to.equal(404);
+    expect(res.status).to.equal(401);
+    expect(res.body).to.have.property('ok', false);
   });
 
   it('POST /subscriptions/:id/renew should return 401 when Authorization missing', async () => {
@@ -31,4 +32,11 @@ describe('/subscriptions endpoints (unauthenticated)', () => {
     expect(res.status).to.equal(401);
     expect(res.body).to.have.property('ok', false);
   });
+
+  it('DELETE /subscriptions/:id should return 401 when Authorization missing', async () => {
+    const res = await request(app).delete('/subscriptions/abc123');
+    expect(res.status).to.equal(401);
+    expect(res.body).to.have.property('ok', false);
+  });
 });
+

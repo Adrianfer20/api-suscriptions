@@ -71,6 +71,12 @@ class SubscriptionService {
     return { id: doc.id, ...(doc.data() as any) } as Subscription;
   }
 
+  async delete(id: string) {
+    if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    await this.collection().doc(id).delete();
+    return true;
+  }
+
   async renew(id: string) {
     const docRef = this.collection().doc(id);
     const doc = await docRef.get();

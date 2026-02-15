@@ -91,6 +91,11 @@ Gestionado por administradores.
   - **Uso:** Ver detalles de una suscripción.
 - **`POST /subscriptions/:id/renew`**
   - **Uso:** Renovar una suscripción manualmente (extiende la fecha de corte).
+- **`DELETE /subscriptions/:id`**
+  - **Uso:** Eliminar permanentemente una suscripción (Admin).
+- **`PATCH /subscriptions/:id`**
+  - **Body:** Campos a actualizar (`startDate`, `cutDate`, `plan`, `amount`).
+  - **Uso:** Actualizar información de la suscripción.
 
 ### Comunicaciones (`/communications`)
 - **`POST /communications/send-template`** (Admin)

@@ -11,6 +11,8 @@ const router = Router();
 router.post('/', authenticate, requireRole('admin'), validateBody(createSubscriptionSchema), (req, res) => subscriptionController.create(req, res));
 router.get('/', authenticate, requireRole('admin'), (req, res) => subscriptionController.list(req, res));
 router.get('/:id', authenticate, requireRole('admin'), (req, res) => subscriptionController.getById(req, res));
+router.patch('/:id', authenticate, requireRole('admin'), validateBody(updateSubscriptionSchema), (req, res) => subscriptionController.update(req, res));
+router.delete('/:id', authenticate, requireRole('admin'), (req, res) => subscriptionController.delete(req, res));
 router.post('/:id/renew', authenticate, requireRole('admin'), (req, res) => subscriptionController.renew(req, res));
 
 export default router;

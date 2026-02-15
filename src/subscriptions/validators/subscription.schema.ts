@@ -33,8 +33,7 @@ export const updateSubscriptionSchema = z
     startDate: isoDateSchema.optional(),
     cutDate: isoDateSchema.optional(),
     plan: z.string().trim().min(1).optional(),
-    amount: amountSchema.optional(),
-    billingDate: isoDateSchema.optional()
+    amount: amountSchema.optional()
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, {
