@@ -1,0 +1,119 @@
+{
+  "info": {
+    "name": "API-SUSCRIPTIONS - Auth Module",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create User (admin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"secretPass123\",\n  \"displayName\": \"Test User\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/auth/create-user", "host": ["{{base_url}}"], "path": ["auth","create-user"] }
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const json = pm.response.json();",
+              "  if (json.customToken) pm.environment.set('customToken', json.customToken);",
+              "  if (json.uid) pm.environment.set('createdUid', json.uid);",
+              "}",
+              "pm.test('status is 201', function () { pm.response.to.have.status(201); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Exchange CustomToken -> idToken (Firebase REST)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{customToken}}\",\n  \"returnSecureToken\": true\n}"
+        },
+        "url": {
+          "raw": "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key={{FIREBASE_API_KEY}}",
+          "protocol": "https",
+          "host": ["identitytoolkit","googleapis","com"],
+          "path": ["v1","accounts:signInWithCustomToken"],
+          "query": [{"key":"key","value":"{{FIREBASE_API_KEY}}"}]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.idToken) pm.environment.set('idToken', json.idToken);",
+              "pm.test('got idToken', function () { pm.expect(json.idToken).to.exist; });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login (server verifies idToken)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"idToken\": \"{{idToken}}\"\n}" },
+        "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth","login"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.user) pm.environment.set('meUser', JSON.stringify(json.user));",
+              "pm.test('login ok', function () { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Me (protected)",
+      "request": {
+        "method": "GET",
+        "header": [ { "key": "Authorization", "value": "Bearer {{idToken}}" } ],
+        "url": { "raw": "{{base_url}}/auth/me", "host": ["{{base_url}}"], "path": ["auth","me"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('me ok', function () { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000" },
+    { "key": "FIREBASE_API_KEY", "value": "" },
+    { "key": "admin_token", "value": "" },
+    { "key": "customToken", "value": "" },
+    { "key": "idToken", "value": "" }
+  ]
+}

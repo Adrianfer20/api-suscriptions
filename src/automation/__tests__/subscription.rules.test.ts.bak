@@ -1,0 +1,62 @@
+import { expect } from 'chai';
+import { evaluateSubscriptionRules, getTodayInfo } from '../rules/subscription.rules';
+import { Subscription } from '../../subscriptions/models/subscription.model';
+
+describe('automation rules', () => {
+  it('should request notification and inactive marking when cut date is today', () => {
+    const subscription: Subscription = {
+      id: 'sub-1',
+      clientId: 'client-1',
+      startDate: '2024-01-01',
+      cutDate: '2024-02-10',
+      plan: 'starlink-basic',
+      amount: '$50',
+      billingDate: '2024-02-08',
+      status: 'active'
+    };
+
+    const evaluation = evaluateSubscriptionRules(subscription, '2024-02-10');
+    expect(evaluation.shouldNotifyCut).to.equal(true);
+    expect(evaluation.shouldMarkCut).to.equal(true);
+    expect(evaluation.shouldActivateFromPending).to.equal(false);
+  });
+
+  it('should skip notification when already inactive', () => {
+    const subscription: Subscription = {
+      id: 'sub-2',
+      clientId: 'client-2',
+      startDate: '2024-01-01',
+      cutDate: '2024-02-10',
+      plan: 'starlink-basic',
+      amount: '$50',
+      billingDate: '2024-02-08',
+      status: 'inactive'
+    };
+
+    const evaluation = evaluateSubscriptionRules(subscription, '2024-02-10');
+    expect(evaluation.shouldNotifyCut).to.equal(false);
+    expect(evaluation.shouldMarkCut).to.equal(false);
+  });
+
+  it('should activate pending subscription when start date reached', () => {
+    const subscription: Subscription = {
+      id: 'sub-3',
+      clientId: 'client-3',
+      startDate: '2024-02-10',
+      cutDate: '2024-03-10',
+      plan: 'starlink-basic',
+      amount: '$50',
+      billingDate: '2024-02-08',
+      status: 'pending'
+    };
+
+    const evaluation = evaluateSubscriptionRules(subscription, '2024-02-11');
+    expect(evaluation.shouldActivateFromPending).to.equal(true);
+  });
+
+  it('should respect timezone when computing today info', () => {
+    const info = getTodayInfo({ referenceDate: new Date('2024-02-10T05:00:00Z'), timeZone: 'America/Bogota' });
+    expect(info.todayIso).to.equal('2024-02-10');
+    expect(info.timeZone).to.equal('America/Bogota');
+  });
+});

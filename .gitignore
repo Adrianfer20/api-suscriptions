@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+
+# Ignore Firebase admin service account JSON(s)
+starlink-suscription-firebase-adminsdk-*.json
+*.firebase-adminsdk-*.json
+
+# Ignore moved service account and local config
+config/firebase.json
+config/secrets.json
+
+# Ensure .env.example is allowed
+!.env.example
