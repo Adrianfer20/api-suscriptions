@@ -4,6 +4,18 @@ import { Subscription } from '../../subscriptions/models/subscription.model';
 import { getTodayInfo } from '../rules/subscription.rules';
 import { addDaysTZ } from '../../subscriptions/utils/date.util';
 
+export interface SchedulerConfig {
+  cronExpression: string;
+  enabled: boolean;
+  timeZone: string;
+}
+
+const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
+  cronExpression: '0 9 * * *',
+  enabled: true,
+  timeZone: 'America/Caracas'
+};
+
 export interface AutomationRunOptions {
   invokedBy?: string;
   reason?: string;
@@ -48,6 +60,37 @@ class AutomationService {
 
   private subscriptionsCollection() {
     return this.firestore().collection('subscriptions');
+  }
+
+  private systemCollection() {
+    return this.firestore().collection('system');
+  }
+
+  async getSchedulerConfig(): Promise<SchedulerConfig & { lastUpdated?: string }> {
+    try {
+      const doc = await this.systemCollection().doc('automation').get();
+      if (!doc.exists) {
+        return DEFAULT_SCHEDULER_CONFIG;
+      }
+      return { ...DEFAULT_SCHEDULER_CONFIG, ...(doc.data() as Partial<SchedulerConfig>) };
+    } catch (error) {
+      console.error('Error fetching scheduler config', error);
+      return DEFAULT_SCHEDULER_CONFIG;
+    }
+  }
+
+  async updateSchedulerConfig(config: Partial<SchedulerConfig>): Promise<void> {
+    await this.systemCollection().doc('automation').set(
+      {
+        ...config,
+        lastUpdated: new Date().toISOString()
+      },
+      { merge: true }
+    );
+  }
+
+  async deleteSchedulerConfig(): Promise<void> {
+    await this.systemCollection().doc('automation').delete();
   }
 
   private logsCollection() {
