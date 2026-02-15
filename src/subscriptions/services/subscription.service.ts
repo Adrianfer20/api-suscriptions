@@ -14,7 +14,7 @@ class SubscriptionService {
     return firebaseAdmin.firestore().collection('clients');
   }
 
-  async create(data: Pick<Subscription, 'clientId' | 'startDate' | 'cutDate' | 'plan' | 'amount'>) {
+  async create(data: Pick<Subscription, 'clientId' | 'startDate' | 'cutDate' | 'plan' | 'amount' | 'passwordSub'>) {
     // validate client exists (by doc id or uid)
     const byId = await this.clientsCollection().doc(data.clientId).get();
     let clientExists = byId.exists;
@@ -35,6 +35,7 @@ class SubscriptionService {
       cutDate: data.cutDate,
       plan: data.plan,
       amount: data.amount,
+      passwordSub: data.passwordSub || null,
       status,
       createdAt: now,
       updatedAt: now

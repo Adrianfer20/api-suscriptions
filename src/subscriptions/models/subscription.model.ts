@@ -7,6 +7,7 @@ export interface Subscription {
   cutDate: string; // ISO date yyyy-mm-dd
   plan: string;
   amount: string; // currency string (e.g. "$50")
+  passwordSub?: string;
   status: SubscriptionStatus;
   createdAt?: any;
   updatedAt?: any;
