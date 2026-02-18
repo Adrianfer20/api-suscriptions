@@ -292,20 +292,50 @@ class CommunicationsService {
     const fromPhone = (From || '').replace('whatsapp:', '');
     if (!fromPhone) throw new Error('Invalid sender');
 
-    // Find client
-    let clientId = 'unknown';
     let clientName = ProfileName || 'Unknown';
-    
-    // Try to find client by 'phone'
+    let clientId = 'unknown';
+
+    const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
+
+    // 1. Try to find client by 'phone'
     const qSnapshot = await this.clientsCollection().where('phone', '==', fromPhone).limit(1).get();
+    
     if (!qSnapshot.empty) {
       const clientDoc = qSnapshot.docs[0];
       clientId = clientDoc.id;
       const clientData = clientDoc.data();
       clientName = clientData.name || clientName;
-    }
+    } else {
+        // 2. If client not found, create a new "Prospect" client automatically so it appears in conversations
+        try {
+            // Generate a placeholder UID for prospects
+            const tempUid = `whatsapp:${fromPhone}`; 
+            
+            const newClientData = {
+                uid: tempUid,
+                name: ProfileName || `Desconocido ${fromPhone}`,
+                phone: fromPhone,
+                email: '', // No email yet
+                roles: ['lead'], // Mark as lead/prospect
+                createdAt: now,
+                updatedAt: now,
+                notes: 'Creado automáticamente por mensaje entrante de WhatsApp',
+                active: true,
+                // Initialize conversation fields
+                lastMessageAt: now,
+                lastMessageBody: Body || '(Media/No text)',
+                lastMessageDir: 'inbound',
+                unreadCount: 1
+            };
 
-    const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
+            const newClientRef = await this.clientsCollection().add(newClientData);
+            clientId = newClientRef.id;
+        } catch (err) {
+            console.error('Error creating auto-client for unknown number:', err);
+            // Fallback to 'unknown' strictly if creation fails
+            clientId = 'unknown'; 
+        }
+    }
 
     const incomingMsg: Partial<Message> = {
       clientId,
@@ -321,8 +351,11 @@ class CommunicationsService {
 
     const docRef = await this.messagesCollection().add(incomingMsg);
     
-    // If client is known, update conversation metadata
+    // If client exists (which is now almost always true unless creation failed), update conversation metadata
     if (clientId !== 'unknown') {
+        // If it was an existing client (qSnapshot not empty), we simply update. 
+        // If it was a new client, we already set the fields on creation, but updating again is harmless 
+        // and ensures consistency if logic changes above.
         const clientRef = this.clientsCollection().doc(clientId);
         try {
           await clientRef.update({

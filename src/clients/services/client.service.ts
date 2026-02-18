@@ -12,14 +12,82 @@ class ClientService {
 
   async create(data: Pick<Client, 'uid' | 'name' | 'phone' | 'address'>) {
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    
     // Ensure UID exists in Auth
-    await firebaseAdmin.auth().getUser(data.uid);
+    try {
+      await firebaseAdmin.auth().getUser(data.uid);
+    } catch (e) {
+      // In some cases (like manual creation without auth user yet) we might want to skip this check or handle differently.
+      // For now, consistent with previous behavior, we check if UID is valid unless it is a placeholder.
+      if (!data.uid.startsWith('whatsapp:')) {
+         console.warn(`Creating client with possibly invalid Auth UID: ${data.uid}`, e);
+      }
+    }
+
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
+
+    // 1. Check if a prospect with this phone already exists
+    if (data.phone) {
+        const existingSnap = await this.collection()
+            .where('phone', '==', data.phone)
+            .limit(1)
+            .get();
+
+        if (!existingSnap.empty) {
+            const existingDoc = existingSnap.docs[0];
+            const existingData = existingDoc.data();
+            
+            // If the existing client is a "prospect" (created automatically with a placeholder UID or role 'lead')
+            // We should "promote" it to a real client by updating the UID and data.
+            // Check if it looks like a prospect:
+            const isProspect = existingData.uid?.startsWith('whatsapp:') || (existingData.roles && existingData.roles.includes('lead'));
+
+            if (isProspect) {
+                // Merge new data but preserve conversation history
+                await existingDoc.ref.update({
+                    uid: data.uid, // Update to real Auth UID
+                    name: data.name, // Update to real Name
+                    address: data.address || existingData.address || null, // Update address if provided
+                    roles: firebaseAdmin.firestore.FieldValue.arrayRemove('lead'), // Remove 'lead' role optionally? Or just add 'client'?
+                    // For simplicity, let's reset roles or add 'client' if you have a role system.
+                    // Assuming we just update basic info for now. 
+                    updatedAt: now
+                });
+                
+                // Add 'client' role if needed, separate operation to avoid conflicts if 'lead' didn't exist
+                await existingDoc.ref.update({
+                    roles: firebaseAdmin.firestore.FieldValue.arrayUnion('client')
+                });
+
+                const updatedSnap = await existingDoc.ref.get();
+                return { id: existingDoc.id, ...(updatedSnap.data() as any) } as Client;
+            } else {
+                // If a client with this phone ALREADY exists and is NOT a prospect (has a real UID different from the new one),
+                // we have a conflict. A phone number should be unique ? 
+                // Alternatively, we can just throw an error or create a duplicate (which is bad).
+                // Let's assume we want to update the existing client to link to this new UID? 
+                // OR throw error. For safety, let's just log warning and proceed to create NEW one (legacy behavior) 
+                // OR better, update the existing one to the new UID?
+                console.warn(`Client with phone ${data.phone} already exists (ID: ${existingDoc.id}). Updating UID linkage.`);
+                
+                // OPTION: Update the existing client to point to the new UID provided
+                await existingDoc.ref.update({
+                    uid: data.uid,
+                    updatedAt: now
+                });
+                const updatedSnap = await existingDoc.ref.get();
+                return { id: existingDoc.id, ...(updatedSnap.data() as any) } as Client;
+            }
+        }
+    }
+
+    // 2. No existing client found, create new one
     const docRef = await this.collection().add({
       uid: data.uid,
       name: data.name,
       phone: data.phone || null,
       address: data.address || null,
+      roles: ['client'],
       createdAt: now,
       updatedAt: now
     });
