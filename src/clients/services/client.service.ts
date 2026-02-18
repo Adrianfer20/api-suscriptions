@@ -78,22 +78,24 @@ class ClientService {
 
     // 3. Link any existing conversation (from "Unknown" times) to this new client
     if (data.phone) {
-        try {
-            // Check if conversation exists (by phone ID) and update it
-            // We use set with merge: true which works even if it doesn't exist (though it shouldn't be created here if not exist? 
-            // actually if it doesn't exist, we don't necessarily need to create a conversation doc yet until a message is sent.
-            // BUT if we want to ensure future messages link correctly, having the doc is fine. 
-            // However, usually we only care if there is history.
-            // Let's just update if it exists or create simple one.
-            await this.conversationsCollection().doc(data.phone).set({
-                clientId: docRef.id,
-                name: data.name,
-                phone: data.phone,
-                prospect: false
-            }, { merge: true });
-        } catch (err) {
-            console.warn('Failed to link conversation to new client', err);
+      try {
+        // Actualizar conversación existente (si hay)
+        await this.conversationsCollection().doc(data.phone).set({
+          clientId: docRef.id,
+          name: data.name,
+          phone: data.phone,
+          prospect: false
+        }, { merge: true });
+
+        // Migrar mensajes históricos de ese número para asignar el nuevo clientId
+        // (solo si existe la colección de mensajes)
+        const commsService = require('../../communications/services/communications.service').default;
+        if (commsService && commsService.migrateMessagesToClient) {
+          await commsService.migrateMessagesToClient(data.phone, docRef.id);
         }
+      } catch (err) {
+        console.warn('Failed to link conversation to new client or migrate messages', err);
+      }
     }
 
     const snap = await docRef.get();
@@ -136,13 +138,29 @@ class ClientService {
       
       const batch = firebaseAdmin.firestore().batch();
       const clientIds: string[] = [];
+      const phones: string[] = [];
       
       snap.docs.forEach(doc => {
           clientIds.push(doc.id);
+          if (doc.data().phone) phones.push(doc.data().phone);
           batch.delete(doc.ref);
       });
       
       await batch.commit();
+
+      // Actualizar conversación a prospecto si existe
+      for (const phone of phones) {
+        try {
+          await this.conversationsCollection().doc(phone).set({
+            clientId: firebaseAdmin.firestore.FieldValue.delete(),
+            prospect: true,
+            name: 'Desconocido',
+            updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.warn('Failed to update conversation to prospect after client delete', err);
+        }
+      }
       return clientIds;
   }
 }
