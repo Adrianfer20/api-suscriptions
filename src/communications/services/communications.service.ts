@@ -13,6 +13,11 @@ class CommunicationsService {
     return firebaseAdmin.firestore().collection('communications').doc('messages').collection('entries');
   }
 
+  private conversationsCollection() {
+    if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    return firebaseAdmin.firestore().collection('conversations');
+  }
+
   private clientsCollection() {
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     return firebaseAdmin.firestore().collection('clients');
@@ -105,12 +110,18 @@ class CommunicationsService {
     // persist initial record
     const docRef = await this.messagesCollection().add(base);
 
-    // Update client conversation metadata
-    await this.clientsCollection().doc(resolvedClientId).update({
+    // Update conversation metadata
+    // We use phone number as the document ID for conversations
+    await this.conversationsCollection().doc(toPhone).set({
+        clientId: resolvedClientId,
+        name: client.name,
+        phone: toPhone,
         lastMessageAt: now,
         lastMessageBody: `Template: ${templateName}`,
-        lastMessageDir: 'outbound'
-    });
+        lastMessageDir: 'outbound',
+        prospect: false,
+        unreadCount: 0 // Resetting or keeping? For outbound, it doesn't change unread count usually, or sets it to 0 if we consider we replied.
+    }, { merge: true });
 
     // attempt to send via Twilio (WhatsApp)
     try {
@@ -179,11 +190,17 @@ class CommunicationsService {
 
     const docRef = await this.messagesCollection().add(base);
 
-    await this.clientsCollection().doc(resolvedClientId).update({
+    // Update conversation metadata
+    await this.conversationsCollection().doc(toPhone).set({
+        clientId: resolvedClientId,
+        name: client.name,
+        phone: toPhone,
         lastMessageAt: now,
         lastMessageBody: body,
-        lastMessageDir: 'outbound'
-    });
+        lastMessageDir: 'outbound',
+        prospect: false,
+        unreadCount: 0
+    }, { merge: true });
 
     try {
       if (process.env.TEST_DRY_RUN === 'true') {
@@ -305,40 +322,11 @@ class CommunicationsService {
       clientId = clientDoc.id;
       const clientData = clientDoc.data();
       clientName = clientData.name || clientName;
-    } else {
-        // 2. If client not found, create a new "Prospect" client automatically so it appears in conversations
-        try {
-            // Generate a placeholder UID for prospects
-            const tempUid = `whatsapp:${fromPhone}`; 
-            
-            const newClientData = {
-                uid: tempUid,
-                name: ProfileName || `Desconocido ${fromPhone}`,
-                phone: fromPhone,
-                email: '', // No email yet
-                roles: ['lead'], // Mark as lead/prospect
-                createdAt: now,
-                updatedAt: now,
-                notes: 'Creado automáticamente por mensaje entrante de WhatsApp',
-                active: true,
-                // Initialize conversation fields
-                lastMessageAt: now,
-                lastMessageBody: Body || '(Media/No text)',
-                lastMessageDir: 'inbound',
-                unreadCount: 1
-            };
-
-            const newClientRef = await this.clientsCollection().add(newClientData);
-            clientId = newClientRef.id;
-        } catch (err) {
-            console.error('Error creating auto-client for unknown number:', err);
-            // Fallback to 'unknown' strictly if creation fails
-            clientId = 'unknown'; 
-        }
-    }
+    } 
+    // We no longer create a "prospect" client here. We just handle the conversation.
 
     const incomingMsg: Partial<Message> = {
-      clientId,
+      clientId, // might be 'unknown'
       body: Body || '', 
       from: fromPhone,
       to: (To || '').replace('whatsapp:', ''),
@@ -351,32 +339,41 @@ class CommunicationsService {
 
     const docRef = await this.messagesCollection().add(incomingMsg);
     
-    // If client exists (which is now almost always true unless creation failed), update conversation metadata
+    // Update or Create Conversation Document
+    // ID is the phone number
+    const conversationRef = this.conversationsCollection().doc(fromPhone);
+    
+    const conversationData: any = {
+        phone: fromPhone,
+        lastMessageAt: now,
+        lastMessageBody: Body || '(Media/No text)',
+        lastMessageDir: 'inbound',
+        unreadCount: firebaseAdmin.firestore.FieldValue.increment(1),
+        prospect: clientId === 'unknown'
+    };
+    
     if (clientId !== 'unknown') {
-        // If it was an existing client (qSnapshot not empty), we simply update. 
-        // If it was a new client, we already set the fields on creation, but updating again is harmless 
-        // and ensures consistency if logic changes above.
-        const clientRef = this.clientsCollection().doc(clientId);
-        try {
-          await clientRef.update({
-              lastMessageAt: now,
-              lastMessageBody: Body || '(Media/No text)',
-              lastMessageDir: 'inbound',
-              unreadCount: firebaseAdmin.firestore.FieldValue.increment(1)
-          });
-        } catch (e) {
-          console.warn(`Failed to update client ${clientId} for inbound message.`, e);
-        }
+        conversationData.clientId = clientId;
+        conversationData.name = clientName; 
+    } else {
+        // Only set name if it doesn't exist or update it? 
+        // We can create it if not exists.
+        // If it exists, we might want to keep the name user set? 
+        // For simplicity, let's use merge: true and only set name if we have a profile name or it's new
+        if (ProfileName) conversationData.name = ProfileName;
     }
+
+    // Use set with merge to create or update
+    await conversationRef.set(conversationData, { merge: true });
 
     return { id: docRef.id, ...incomingMsg };
   }
 
   async getConversations(limitVal: number = 20, startAfterId?: string) {
-    let query = this.clientsCollection().orderBy('lastMessageAt', 'desc');
+    let query = this.conversationsCollection().orderBy('lastMessageAt', 'desc');
     
     if (startAfterId) {
-       const cursorDoc = await this.clientsCollection().doc(startAfterId).get();
+       const cursorDoc = await this.conversationsCollection().doc(startAfterId).get();
        if (cursorDoc.exists) {
           query = query.startAfter(cursorDoc);
        }
@@ -385,47 +382,71 @@ class CommunicationsService {
     query = query.limit(limitVal);
     const snaps = await query.get();
     
-    // Filter out clients without conversations if needed, but query orderBy lastMessageAt implies they have one (if field exists).
-    // However, if we want ALL clients, we might see some without msgs at the end.
-    // Assuming we only want active conversations:
     return snaps.docs.map(doc => ({
         id: doc.id,
         ...(doc.data() as any)
-    })).filter(c => c.lastMessageAt);
+    }));
   }
 
-  async markAsRead(clientIdOrUid: string) {
+  async markAsRead(clientIdOrPhone: string) {
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     
-    // Resolve client
-    let docId = clientIdOrUid;
-    let clientDoc = await this.clientsCollection().doc(clientIdOrUid).get();
+    let docId = clientIdOrPhone;
+    let phone = clientIdOrPhone;
     
-    if (!clientDoc.exists) {
-       const q = await this.clientsCollection().where('uid', '==', clientIdOrUid).limit(1).get();
-       if (!q.empty) {
-         clientDoc = q.docs[0];
-       }
+    // 1. Try to fetch conversation by Phone (if param is phone)
+    let convDoc = await this.conversationsCollection().doc(clientIdOrPhone).get();
+    
+    if (!convDoc.exists) {
+        // 2. Try to fetch by clientId
+        // The param might be clientId
+        const q = await this.conversationsCollection().where('clientId', '==', clientIdOrPhone).limit(1).get();
+        if (!q.empty) {
+            convDoc = q.docs[0];
+            phone = convDoc.id; // phone is the ID
+        } else {
+             // Maybe clientIdOrPhone IS the client Doc ID in 'clients' collection, let's verify
+             const clientDoc = await this.clientsCollection().doc(clientIdOrPhone).get();
+             if (clientDoc.exists) {
+                 const clientData = clientDoc.data();
+                 if (clientData && clientData.phone) {
+                     phone = clientData.phone;
+                     convDoc = await this.conversationsCollection().doc(phone).get();
+                 }
+             }
+        }
+    } else {
+        // Document exists, so param was likely the phone number
+        phone = convDoc.id;
     }
-    
-    if (!clientDoc.exists) {
-       // Silent fail or throw? Throw is better for API response
-       throw new Error('Client not found');
-    }
-    
-    docId = clientDoc.id;
 
-    // 1. Reset client unread count
-    await this.clientsCollection().doc(docId).update({ unreadCount: 0 });
+    if (!convDoc || !convDoc.exists) {
+        // Conversation not found, maybe just client exists?
+        // If client exists but no conversation, nothing to mark as read really.
+       throw new Error('Conversation not found');
+    }
+
+    // 1. Reset conversation unread count
+    await this.conversationsCollection().doc(phone).update({ unreadCount: 0 });
 
     // 2. Mark specific messages as read (limit 500 per batch)
-    // Query inbound 'received' messages for this client
-    const unreadSnap = await this.messagesCollection()
-      .where('clientId', '==', docId)
+    // Query inbound 'received' messages for this phone (using 'from') or clientId?
+    // Messages store 'clientId' or 'from'. 
+    // If the message has clientId, we can query by that. If 'unknown', query by 'from'.
+    
+    let unreadQuery = this.messagesCollection()
       .where('direction', '==', 'inbound')
       .where('status', '==', 'received')
-      .limit(500) 
-      .get();
+      .limit(500);
+
+    const convData = convDoc.data();
+    if (convData && convData.clientId) {
+        unreadQuery = unreadQuery.where('clientId', '==', convData.clientId);
+    } else {
+        unreadQuery = unreadQuery.where('from', '==', phone);
+    }
+
+    const unreadSnap = await unreadQuery.get();
       
     if (!unreadSnap.empty) {
         const batch = firebaseAdmin.firestore().batch();
@@ -435,7 +456,7 @@ class CommunicationsService {
         await batch.commit();
     }
 
-    return { ok: true, clientId: docId };
+    return { ok: true, phone };
   }
 }
 
