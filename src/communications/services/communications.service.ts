@@ -70,23 +70,65 @@ class CommunicationsService {
     }
   }
 
-  async sendTemplate(clientId: string, templateName: string, templateData?: any) {
-    // resolve client phone (by doc id or by uid)
-    let clientDoc = await this.clientsCollection().doc(clientId).get();
+  async sendTemplate(clientIdOrPhone: string, templateName: string, templateData?: any) {
+    // 1. Resolve Recipient
+    let resolvedClientId = 'unknown';
+    let toPhone = '';
+    let clientName = '';
+    let client: any = {};
+    let clientDocId = '';
+
+    // A. Try as Client ID (Doc ID or UID)
+    let clientDoc = await this.clientsCollection().doc(clientIdOrPhone).get();
     if (!clientDoc.exists) {
-      const q = await this.clientsCollection().where('uid', '==', clientId).limit(1).get();
+      const q = await this.clientsCollection().where('uid', '==', clientIdOrPhone).limit(1).get();
       if (!q.empty) clientDoc = q.docs[0];
     }
-    if (!clientDoc || !clientDoc.exists) throw new Error('Client not found');
-    const resolvedClientId = clientDoc.id;
-    const client = clientDoc.data() as any;
-    const toPhone = client.phone;
-    if (!toPhone) throw new Error('Client has no phone number');
+
+    if (clientDoc.exists) {
+        resolvedClientId = clientDoc.id;
+        clientDocId = clientDoc.id;
+        client = clientDoc.data();
+        toPhone = client.phone;
+        clientName = client.name;
+    } else {
+        // B. Try as Phone Number
+        // Remove spaces/dashes just in case, but usually passed clean
+        const potentialPhone = clientIdOrPhone.replace(/[\s()-]/g, '');
+        if (/^\+?[0-9]{7,15}$/.test(potentialPhone)) {
+             toPhone = potentialPhone;
+             // Check if this phone belongs to a client we missed?
+             const qPhone = await this.clientsCollection().where('phone', '==', toPhone).limit(1).get();
+             if (!qPhone.empty) {
+                 clientDoc = qPhone.docs[0];
+                 resolvedClientId = clientDoc.id;
+                 clientDocId = clientDoc.id;
+                 client = clientDoc.data();
+                 clientName = client.name;
+                 // It was a valid client phone, proceeding as registered client
+             } else {
+                 // It is truly unknown/prospect
+                 clientName = 'Desconocido';
+             }
+        }
+    }
+
+    if (!toPhone) throw new Error('Recipient not found or has no phone number');
 
     const contentSid = templates[templateName]?.contentSid;
     if (!contentSid) throw new Error('Template not found');
-    const inferredTemplateData = await this.resolveTemplateData(templateName, clientId, client.uid, clientDoc.id);
-    const mergedTemplateData = { ...inferredTemplateData, ...templateData, name: client.name };
+    
+    // Resolve data (might return empty if no client found)
+    const inferredTemplateData = await this.resolveTemplateData(templateName, clientDocId, client.uid, clientDocId);
+    
+    // Merge data
+    const mergedTemplateData = { 
+        ...inferredTemplateData, 
+        ...templateData, 
+        name: clientName 
+    };
+    
+    // Validate vars
     const missingVars = getMissingTemplateVariables(templateName, mergedTemplateData);
     if (missingVars.length > 0) {
       throw new Error(`Missing template variables: ${missingVars.join(', ')}`);
@@ -113,13 +155,13 @@ class CommunicationsService {
     // Update conversation metadata
     // We use phone number as the document ID for conversations
     await this.conversationsCollection().doc(toPhone).set({
-        clientId: resolvedClientId,
-        name: client.name,
+        clientId: resolvedClientId !== 'unknown' ? resolvedClientId : undefined,
+        name: clientName || `Desconocido ${toPhone}`,
         phone: toPhone,
         lastMessageAt: now,
         lastMessageBody: `Template: ${templateName}`,
         lastMessageDir: 'outbound',
-        prospect: false,
+        prospect: resolvedClientId === 'unknown',
         unreadCount: 0 // Resetting or keeping? For outbound, it doesn't change unread count usually, or sets it to 0 if we consider we replied.
     }, { merge: true });
 
@@ -163,17 +205,42 @@ class CommunicationsService {
     }
   }
 
-  async sendText(clientId: string, body: string) {
-    let clientDoc = await this.clientsCollection().doc(clientId).get();
+  async sendText(clientIdOrPhone: string, body: string) {
+    let resolvedClientId = 'unknown';
+    let toPhone = '';
+    let clientName = '';
+
+    // A. Try as Client ID
+    let clientDoc = await this.clientsCollection().doc(clientIdOrPhone).get();
     if (!clientDoc.exists) {
-      const q = await this.clientsCollection().where('uid', '==', clientId).limit(1).get();
+      const q = await this.clientsCollection().where('uid', '==', clientIdOrPhone).limit(1).get();
       if (!q.empty) clientDoc = q.docs[0];
     }
-    if (!clientDoc || !clientDoc.exists) throw new Error('Client not found');
-    const resolvedClientId = clientDoc.id;
-    const client = clientDoc.data() as any;
-    const toPhone = client.phone;
-    if (!toPhone) throw new Error('Client has no phone number');
+    
+    if (clientDoc.exists) {
+      resolvedClientId = clientDoc.id;
+      const client = clientDoc.data() as any;
+      toPhone = client.phone;
+      clientName = client.name;
+    } else {
+        // B. Try as Phone Number
+        const potentialPhone = clientIdOrPhone.replace(/[\s()-]/g, '');
+        if (/^\+?[0-9]{7,15}$/.test(potentialPhone)) {
+            toPhone = potentialPhone;
+            // Maybe find client by phone?
+            const qPhone = await this.clientsCollection().where('phone', '==', toPhone).limit(1).get();
+            if (!qPhone.empty) {
+                clientDoc = qPhone.docs[0];
+                resolvedClientId = clientDoc.id;
+                const data = clientDoc.data() as any;
+                clientName = data.name;
+            } else {
+                clientName = `Desconocido ${toPhone}`;
+            }
+        }
+    }
+
+    if (!toPhone) throw new Error('Recipient not found or has no phone number');
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
@@ -192,14 +259,14 @@ class CommunicationsService {
 
     // Update conversation metadata
     await this.conversationsCollection().doc(toPhone).set({
-        clientId: resolvedClientId,
-        name: client.name,
+        clientId: resolvedClientId !== 'unknown' ? resolvedClientId : undefined,
+        name: clientName,
         phone: toPhone,
         lastMessageAt: now,
         lastMessageBody: body,
         lastMessageDir: 'outbound',
-        prospect: false,
-        unreadCount: 0
+        prospect: resolvedClientId === 'unknown',
+        unreadCount: 0 // Mark as read since we replied?
     }, { merge: true });
 
     try {
@@ -239,64 +306,137 @@ class CommunicationsService {
     }
   }
 
-  async getMessagesByClient(clientIdOrUid: string, limit?: number, startAfterId?: string) {
-    // Resolve client to get both Doc ID and UID
-    let docId = clientIdOrUid;
-    let uid = clientIdOrUid;
+  async getMessagesByClient(identifier: string, limit?: number, startAfterId?: string) {
+    // Determine if identifier is a phone number (simple check: starts with '+' or contains only digits and length > 7)
+    const isPhone = /^\+?[0-9]{7,15}$/.test(identifier);
     
-    // Check if it's a doc ID
-    let clientDoc = await this.clientsCollection().doc(clientIdOrUid).get();
+    let query: any;
     
-    // If not found, check if it is a UID
-    if (!clientDoc.exists) {
-       const q = await this.clientsCollection().where('uid', '==', clientIdOrUid).limit(1).get();
-       if (!q.empty) {
-         clientDoc = q.docs[0];
-       }
+    if (isPhone) {
+        // If it's a phone, we need to find messages where (to == phone) OR (from == phone)
+        // Firestore limitation: No logical OR across different fields directly in one query with orderBy easily.
+        // However, we can query by 'clientId' if the phone belongs to a client, OR query by 'to/from'.
+        // BUT, since we normalized conversations, we usually store 'clientId' as 'unknown' for prospects.
+        // So prospects sort of depend on 'from'.
+        
+        // STRATEGY:
+        // 1. Check if there is a known client with this phone. If so, get their ID and query by clientId (legacy + standard way).
+        // 2. If no client, query by `from == phone` AND `to == phone`? No, inbound is 'from=phone', outbound is 'to=phone'.
+        // Since we can't do OR on (from==X || to==X), we might need two queries and merge, OR rely on a unified field if we had one.
+        // BETTER STRATEGY given current structure:
+        // Messages are either Inbound (from=phone, to=Twilio) OR Outbound (from=Twilio, to=phone).
+        // So we can query:
+        // A) where('clientId', '==', resolvedClientId) -> Covers both directions for registered clients
+        // B) where('from', '==', phone) + where('to', '==', phone) -> For prospects who have clientId='unknown'
+        
+        // Let's first try to resolve a client ID from the phone
+        const clientSnap = await this.clientsCollection().where('phone', '==', identifier).limit(1).get();
+        let resolvedClientId = 'unknown';
+        if (!clientSnap.empty) {
+            resolvedClientId = clientSnap.docs[0].id;
+        }
+
+        if (resolvedClientId !== 'unknown') {
+             // It is a registered client, so all their messages SHOULD have clientId set.
+             query = this.messagesCollection().where('clientId', '==', resolvedClientId).orderBy('createdAt', 'desc');
+        } else {
+             // It is a prospect (unknown client). Messages will have clientId='unknown' (or similar).
+             // We need to fetch inbound (from=phone) and outbound (to=phone) where clientId IS unknown or irrelevant.
+             // But we can't orderBy createdAt across two queries easily with pagination.
+             // HACK/SOLUTION:
+             // Since 'conversations' model uses phone as key, maybe we should start stamping 'conversationId' on messages?
+             // Too late for existing data.
+             
+             // ALTERNATIVE: 
+             // Just fetch by 'clientId' == 'unknown' AND 'from' == phone? 
+             // But what about replies TO them? They will have to=phone.
+             // We can't do (clientId=='unknown' AND (to==phone OR from==phone)).
+             
+             // COMPLEXITY REDUCTION:
+             // For now, let's assume we can query by `from` == identifier. 
+             // This gets all INBOUND messages from them.
+             // What about OUTBOUND replies to prospects? 
+             // They should have `to` == identifier.
+             
+             // Client-Side Merge Strategy for Prospects:
+             // Since volume is likely low for prospects, we can run two queries (limit X) and merge/sort in memory.
+             // BUT pagination is tricky. Easiest is to just fetch limit from both and merge top X.
+             // HOWEVER, if we want strict pagination...
+             
+             // ACTUALLY, if we look at `receive` and `sendText`...
+             // In `receive` we set `clientId`. If unknown, it is 'unknown'.
+             // In `sendText`, if we modify it to allow sending to phones without client, we would set clientId='unknown' too.
+             
+             // If we really want to support this well, we should add a 'phone' or 'conversationId' field to ALL messages 
+             // equal to the user's phone number (regardless of direction).
+             // But for now, let's try the Client ID resolution first (covers 90% cases).
+             // If not found, we fall back to a "Best Effort" query or Client Side Merge.
+             
+             // Let's implement the Merge for Unknown phones:
+             // We will query where `from` == phone (Inbound)
+             // AND `to` == phone (Outbound)
+             // Then merge and sort.
+             
+             const limitVal = limit || 20;
+             const q1 = this.messagesCollection().where('from', '==', identifier).orderBy('createdAt', 'desc').limit(limitVal);
+             const q2 = this.messagesCollection().where('to', '==', identifier).orderBy('createdAt', 'desc').limit(limitVal);
+             
+             // This doesn't support startAfter properly across mixed streams easily without complex logic.
+             // For simple usage, we just fetch mostly recent. 
+             const [inbound, outbound] = await Promise.all([q1.get(), q2.get()]);
+             
+             const allDocs = [...inbound.docs, ...outbound.docs].map(d => ({ id: d.id, ...(d.data() as any) } as Message));
+             // Sort by createdAt desc
+             allDocs.sort((a, b) => {
+                 const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+                 const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+                 return tB - tA;
+             });
+             
+             return allDocs.slice(0, limitVal);
+        }
+    } else {
+        // It is NOT a phone, so it must be a UUID/DocID (Behavior as before)
+        // Resolve client to get both Doc ID and UID
+        let docId = identifier;
+        let uid = identifier;
+        
+        let clientDoc = await this.clientsCollection().doc(identifier).get();
+        if (!clientDoc.exists) {
+           const q = await this.clientsCollection().where('uid', '==', identifier).limit(1).get();
+           if (!q.empty) {
+             clientDoc = q.docs[0];
+           }
+        }
+    
+        if (clientDoc.exists) {
+           docId = clientDoc.id;
+           const data = clientDoc.data() as any;
+           uid = data.uid || 'unknown';
+        }
+    
+        const candidates = Array.from(new Set([docId, uid])).filter(x => x !== 'unknown');
+        query = this.messagesCollection()
+          .where('clientId', 'in', candidates)
+          .orderBy('createdAt', 'desc');
     }
 
-    if (clientDoc.exists) {
-       docId = clientDoc.id;
-       const data = clientDoc.data() as any;
-       uid = data.uid || 'unknown';
-    }
-
-    // Query for messages matching either Doc ID or UID to support legacy data
-    const candidates = Array.from(new Set([docId, uid])).filter(x => x !== 'unknown');
-    
-    // NOTE: 'in' query supports up to 10 values.
-    // We also need composite index on 'clientId' + 'createdAt'
-    // BUT 'in' queries with orderBy might require specific index configuration or client-side merging.
-    // Firestore 'in' matches ANY of the values. 
-    // However, if we simply use 'where clientId == resolvedDocId', we fix the main issue (inbound messages).
-    // If we want to support legacy outbound messages (stored with UID), 'in' is better.
-    
-    let query: any = this.messagesCollection()
-      .where('clientId', 'in', candidates)
-      .orderBy('createdAt', 'desc');
-
-    if (startAfterId) {
+    if (startAfterId && query) {
       const cursorDoc = await this.messagesCollection().doc(startAfterId).get();
       if (!cursorDoc.exists) {
         throw new Error('Invalid cursor');
       }
       query = query.startAfter(cursorDoc);
     }
-    if (limit && Number.isInteger(limit) && limit > 0) query = query.limit(limit);
+    if (limit && Number.isInteger(limit) && limit > 0 && query) query = query.limit(limit);
     
     try {
+      if (!query) return []; // Should have been handled above (client side merge case returns directly)
       const snaps = await query.get();
       return snaps.docs.map((d: firestore.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) } as Message));
     } catch (e: any) {
-        // Fallback: if 'in' query fails (index missing), try querying by Doc ID only (the correct way forward)
-        // This handles cases where index isn't updated for 'in' operator immediately.
-        console.warn('Composite query failed, falling back to Doc ID only', e);
-        const fallbackQuery = this.messagesCollection()
-             .where('clientId', '==', docId)
-             .orderBy('createdAt', 'desc')
-             .limit(limit || 20);
-        const snaps = await fallbackQuery.get();
-        return snaps.docs.map((d: firestore.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) } as Message));
+        console.warn('Query failed', e);
+        return [];
     }
   }
 

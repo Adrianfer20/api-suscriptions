@@ -63,10 +63,11 @@ La mayoría de los endpoints están protegidos y requieren un token de Firebase 
 Gestionado por administradores.
 - **`POST /clients`**
   - **Body:** `{ "uid": "firebase-uid", "name": "Nombre", "phone": "+52...", "address": "..." }`
+  - **Nota:** Si se crea un cliente con un número de teléfono que ya tiene un historial de conversación (como "Desconocido"), el sistema vinculará automáticamente el chat existente al nuevo cliente, preservando el historial.
   - **Respuesta:** `{ "ok": true, "data": { ...client } }`
 - **`GET /clients`**
   - **Query:** `limit` (número), `startAfter` (cursor para paginación).
-  - **Respuesta:** Lista de clientes.
+  - **Respuesta:** Lista de clientes registrados.
 - **`GET /clients/:id`**
   - **Uso:** Obtener detalle de un cliente.
 - **`PATCH /clients/:id`**
@@ -98,18 +99,26 @@ Gestionado por administradores.
   - **Uso:** Actualizar información de la suscripción.
 
 ### Comunicaciones (`/communications`)
+- **`GET /communications/conversations`** (Admin/Staff)
+  - **Uso:** Obtener lista de conversaciones (mezcla de Clientes y Desconocidos).
+  - **Identificadores:** Utiliza el campo `phone` como ID único.
+  - **Respuesta:** Objeto `Conversation` (ver Modelos).
+- **`GET /communications/messages/:id`**
+  - **Param :id:** Puede ser el `clientId` (viejo) o el `phoneNumber` (nuevo, recomendado para desconocidos).
+  - **Uso:** Ver historial de mensajes de una conversación.
+- **`POST /communications/conversations/:id/read`**
+  - **Param :id:** Puede ser el `clientId` o el `phoneNumber`.
+  - **Uso:** Marcar todos los mensajes entrantes como leídos.
 - **`POST /communications/send-template`** (Admin)
   - **Body:** `{ "clientId": "...", "template": "nombre_plantilla" }`
-  - **Uso:** Enviar mensajes pre-aprobados por WhatsApp (inicio de conversación).
+  - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para enviar a prospectos.
+  - **Uso:** Enviar plantillas WhatsApp a Clientes o Prospectos.
 - **`POST /communications/send`** (Admin/Staff)
   - **Body:** `{ "clientId": "...", "body": "Texto libre..." }`
-  - **Uso:** Enviar respuesta de texto libre (solo dentro de la ventana de 24h).
-- **`GET /communications/conversations`** (Admin/Staff)
-  - **Uso:** Listar conversaciones activas.
-- **`GET /communications/messages/:clientId`**
-  - **Uso:** Ver historial de mensajes con un cliente específico.
+  - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para chatear con prospectos.
+  - **Uso:** Responder con texto libre (requiere sesión abierta 24h).
 - **`POST /communications/webhook`**
-  - **Uso:** Endpoint público para recibir eventos de Twilio (mensajes entrantes).
+  - **Uso:** Endpoint público (Twilio) para recibir mensajes. Crea una conversación "Desconocido" si el número no es cliente.
 
 ### Automatización (`/automation`)
 - **`POST /automation/run-daily`** (Admin)
@@ -118,6 +127,21 @@ Gestionado por administradores.
   - **Uso:** Ejecutar manualmente el job diario que verifica vencimientos y envía recordatorios.
 
 ## 6. Modelos de Datos (Resumen)
+
+### Conversation
+Ahora las conversaciones son independientes de los clientes.
+```json
+{
+  "id": "+521234567890", 
+  "phone": "+521234567890",
+  "name": "Cliente Nombre" || "WhatsApp Profile",
+  "clientId": "firebase_doc_id" || null, // null = Desconocido (Prospecto)
+  "prospect": true || false,
+  "unreadCount": 1,
+  "lastMessageAt": "Timestamp",
+  "lastMessageBody": "..."
+}
+```
 
 ### Subscription
 - **Estado:** `active`, `inactive`, `past_due`, `cancelled`.
