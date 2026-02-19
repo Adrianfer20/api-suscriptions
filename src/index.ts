@@ -20,7 +20,12 @@ const port = PORT;
 // Confía en el proxy de Railway (necesario para rate-limit y obtener la IP correcta)
 app.set('trust proxy', 1); 
 
-const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:5173', 'http://192.168.1.6:5173'];
+const defaultCorsOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://192.168.1.6:5173',
+  'https://adrianfer20.github.io'
+];
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
   : defaultCorsOrigins;
