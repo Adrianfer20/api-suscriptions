@@ -1,8 +1,30 @@
 import { Request, Response } from 'express';
 import clientService from '../services/client.service';
+import firebaseAdmin from '../../config/firebaseAdmin';
 import type { CreateClientInput, UpdateClientInput } from '../validators/client.schema';
 
 class ClientController {
+    async delete(req: Request, res: Response) {
+      try {
+        const uid = String(req.params.id);
+        // Eliminar cliente en Firestore y conversaciones
+        const clientIds = await clientService.deleteByUid(uid);
+        if (!clientIds || clientIds.length === 0) {
+          return res.status(404).json({ ok: false, message: 'Cliente no encontrado' });
+        }
+        // Eliminar usuario en Auth
+        if (clientIds && clientIds.length > 0 && firebaseAdmin && firebaseAdmin.auth) {
+          try {
+            await firebaseAdmin.auth().deleteUser(uid);
+          } catch (err) {
+            // Si ya no existe en Auth, ignorar
+          }
+        }
+        return res.json({ ok: true, deleted: clientIds });
+      } catch (err: any) {
+        return res.status(500).json({ ok: false, message: err?.message || 'No se pudo eliminar el cliente' });
+      }
+    }
   async create(req: Request, res: Response) {
     try {
       const data = req.validatedData as CreateClientInput;
