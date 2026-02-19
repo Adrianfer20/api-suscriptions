@@ -25,7 +25,8 @@ export const createSubscriptionSchema = z
     cutDate: isoDateSchema,
     plan: z.string().trim().min(1),
     amount: amountSchema,
-    passwordSub: z.string().trim().min(1).optional()
+    passwordSub: z.string().trim().min(1).optional(),
+    country: z.string().trim().min(1)
   })
   .strict();
 
@@ -35,7 +36,8 @@ export const updateSubscriptionSchema = z
     cutDate: isoDateSchema.optional(),
     plan: z.string().trim().min(1).optional(),
     amount: amountSchema.optional(),
-    passwordSub: z.string().trim().min(1).optional()
+    passwordSub: z.string().trim().min(1).optional(),
+    country: z.string().trim().min(1).optional()
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, {

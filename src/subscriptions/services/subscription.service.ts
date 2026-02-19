@@ -37,6 +37,7 @@ class SubscriptionService {
       amount: data.amount,
       passwordSub: data.passwordSub || null,
       status,
+        country: (data as any).country,
       createdAt: now,
       updatedAt: now
     });

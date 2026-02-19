@@ -83,7 +83,8 @@ Gestionado por administradores.
       "startDate": "YYYY-MM-DD",
       "cutDate": "YYYY-MM-DD",
       "plan": "Plan Name",
-      "amount": "$100.00"
+      "amount": "$100.00",
+      "country": "VES"
     }
     ```
 - **`GET /subscriptions`**

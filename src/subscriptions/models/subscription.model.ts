@@ -9,6 +9,7 @@ export interface Subscription {
   amount: string; // currency string (e.g. "$50")
   passwordSub?: string;
   status: SubscriptionStatus;
+  country: string; // country abbreviation (e.g. "VES")
   createdAt?: any;
   updatedAt?: any;
 }
