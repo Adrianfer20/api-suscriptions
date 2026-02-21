@@ -12,6 +12,7 @@ import clientsRoutes from './clients/routes/client.routes';
 import subscriptionsRoutes from './subscriptions/routes/subscription.routes';
 import communicationsRoutes from './communications/routes/communications.routes';
 import automationRoutes from './automation/routes/automation.routes';
+import { paymentRoutes } from './payments/routes';
 import { startDailyAutomationJob } from './automation/jobs/daily.job';
 
 const app = express();
@@ -104,6 +105,9 @@ app.use('/communications', communicationsRoutes);
 
 // Mount automation module
 app.use('/automation', automationRoutes);
+
+// Mount payments module
+app.use('/payments', paymentRoutes);
 
 import errorHandler from './middlewares/errorHandler';
 
