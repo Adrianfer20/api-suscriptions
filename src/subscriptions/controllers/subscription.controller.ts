@@ -68,6 +68,17 @@ class SubscriptionController {
       return res.status(400).json({ ok: false, message: err?.message || 'Unable to renew' });
     }
   }
+
+  async changeStatus(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const { status } = req.validatedData as { status: 'active' | 'about_to_expire' | 'suspended' | 'paused' | 'cancelled' };
+      const updated = await subscriptionService.update(id, { status });
+      return res.json({ ok: true, data: updated });
+    } catch (err: any) {
+      return res.status(400).json({ ok: false, message: err?.message || 'Unable to change status' });
+    }
+  }
 }
 
 const subscriptionController = new SubscriptionController();

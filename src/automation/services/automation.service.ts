@@ -2,7 +2,7 @@ import firebaseAdmin from '../../config/firebaseAdmin';
 import communicationsService from '../../communications/services/communications.service';
 import { Subscription } from '../../subscriptions/models/subscription.model';
 import { getTodayInfo } from '../rules/subscription.rules';
-import { addDaysTZ } from '../../subscriptions/utils/date.util';
+import { addDaysTZ, addMonthsTZ } from '../../subscriptions/utils/date.util';
 
 export interface SchedulerConfig {
   cronExpression: string;
@@ -126,14 +126,12 @@ class AutomationService {
 
     // 2. Process Cutoff Day (Day 0)
     // Formula: cutDate == today. Active subscriptions.
-    // Action: Notify Cutoff + Mark Inactive.
+    // Action: Notify Cutoff (no immediate status change; month-based rules handle overdue state transitions).
     await this.processCutoffDay(todayIso, dryRun, result);
 
-    // 3. Process Post-Suspension Notice (Day +1)
-    // Formula: cutDate == today - 1. Inactive/Suspended subscriptions.
-    // Action: Notify Suspension.
-    const suspendedDate = addDaysTZ(todayIso, -1, timeZone);
-    await this.processSuspendedNotice(suspendedDate, dryRun, result);
+    // 4. Overdue rules: 1 month overdue -> about_to_expire, 2 months overdue -> suspended
+    await this.processMonth1Overdue(addMonthsTZ(todayIso, -1), dryRun, result);
+    await this.processMonth2Overdue(addMonthsTZ(todayIso, -2), dryRun, result);
 
     await this.writeRunLog(result, startedAt, options);
     return result;
@@ -203,29 +201,19 @@ class AutomationService {
         }
       }
 
-      // 2. Mark as Inactive/Suspended
-      if (dryRun) {
-        detail.actions.push('mark-inactive (dry-run)');
-      } else {
-        try {
-          await this.updateSubscriptionStatus(sub.id!, 'inactive');
-          detail.actions.push('mark-inactive');
-          result.subscriptionsCut++;
-        } catch (err: any) {
-          result.errors.push({ subscriptionId: sub.id, action: 'mark-inactive', message: err.message });
-        }
-      }
+      // 2. No automatic status change at cutoff day; month-based processors will handle overdue transitions
+      // 2. No automatic status change at cutoff day; overdue rules handle month-based transitions.
+      detail.actions.push('no-status-change-at-cutoff');
 
       result.actionDetails.push(detail);
     }
   }
 
   // --- Step 3: Suspended Notice (Day +1) ---
-  private async processSuspendedNotice(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
-    // Look for INACTIVE subscriptions whose cutoff was Yesterday
-    // This confirms they were cut yesterday and not renewed yet.
+  private async processMonth1Overdue(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
+    // 1 month after cutDate -> mark as about_to_expire and notify
     const snapshot = await this.subscriptionsCollection()
-      .where('status', '==', 'inactive')
+      .where('status', '==', 'active')
       .where('cutDate', '==', targetCutDate)
       .get();
 
@@ -235,18 +223,54 @@ class AutomationService {
       const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
 
       if (dryRun) {
-        detail.actions.push('notify-suspended (dry-run)');
+        detail.actions.push('mark-about_to_expire (dry-run)');
+      } else {
+        try {
+          await this.updateSubscriptionStatus(sub.id!, 'about_to_expire');
+          detail.actions.push('mark-about_to_expire');
+        } catch (err: any) {
+          result.errors.push({ subscriptionId: sub.id, action: 'mark-about_to_expire', message: err.message });
+        }
+      }
+      result.actionDetails.push(detail);
+    }
+  }
+
+  private async processMonth2Overdue(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
+    // 2 months after cutDate -> mark as suspended and notify
+    const snapshot = await this.subscriptionsCollection()
+      .where('cutDate', '==', targetCutDate)
+      .get();
+
+    for (const doc of snapshot.docs) {
+      const sub = { id: doc.id, ...(doc.data() as Subscription) };
+      // skip if already suspended/cancelled/paused
+      if (sub.status === 'suspended' || sub.status === 'cancelled' || sub.status === 'paused') continue;
+      result.processedCount++;
+      const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
+
+      if (dryRun) {
+        detail.actions.push('mark-suspended (dry-run)');
         result.notificationsSent++;
       } else {
         try {
-          await communicationsService.sendTemplate(sub.clientId, 'subscription_suspended_notice_2v', {
-            name: 'Cliente',
-            subscriptionLabel: this.subscriptionPlan(sub)
-          });
-          detail.actions.push('notify-suspended');
-          result.notificationsSent++;
+          await this.updateSubscriptionStatus(sub.id!, 'suspended');
+          detail.actions.push('mark-suspended');
+          // send suspended notice
+          try {
+            await communicationsService.sendTemplate(sub.clientId, 'subscription_suspended_notice_2v', {
+              name: 'Cliente',
+              subscriptionLabel: this.subscriptionPlan(sub)
+            });
+            detail.actions.push('notify-suspended');
+            result.notificationsSent++;
+          } catch (err: any) {
+            // collect but continue
+            result.errors.push({ subscriptionId: sub.id, action: 'notify-suspended', message: err.message });
+          }
+          result.subscriptionsCut++;
         } catch (err: any) {
-          result.errors.push({ subscriptionId: sub.id, action: 'notify-suspended', message: err.message });
+          result.errors.push({ subscriptionId: sub.id, action: 'mark-suspended', message: err.message });
         }
       }
       result.actionDetails.push(detail);

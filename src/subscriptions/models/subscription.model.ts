@@ -1,4 +1,9 @@
-export type SubscriptionStatus = 'active' | 'suspended' | 'inactive';
+export type SubscriptionStatus =
+  | 'active'
+  | 'about_to_expire'
+  | 'suspended'
+  | 'paused'
+  | 'cancelled';
 
 export interface Subscription {
   id?: string;
@@ -7,6 +12,7 @@ export interface Subscription {
   cutDate: string; // ISO date yyyy-mm-dd
   plan: string;
   amount: string; // currency string (e.g. "$50")
+  kitNumber?: string; // e.g. "KIT4M01422983C2H" or "Valor No Disponible"
   passwordSub?: string;
   status: SubscriptionStatus;
   country: string; // country abbreviation (e.g. "VES")

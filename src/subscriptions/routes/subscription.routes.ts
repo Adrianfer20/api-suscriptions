@@ -3,7 +3,7 @@ import authenticate from '../../auth/middlewares/authenticate';
 import requireRole from '../../auth/middlewares/requireRole';
 import subscriptionController from '../controllers/subscription.controller';
 import validateBody from '../../middlewares/validateZod';
-import { createSubscriptionSchema, updateSubscriptionSchema } from '../validators/subscription.schema';
+import { createSubscriptionSchema, updateSubscriptionSchema, statusSchema } from '../validators/subscription.schema';
 
 const router = Router();
 
@@ -14,5 +14,6 @@ router.get('/:id', authenticate, requireRole('admin', 'client'), (req, res) => s
 router.patch('/:id', authenticate, requireRole('admin'), validateBody(updateSubscriptionSchema), (req, res) => subscriptionController.update(req, res));
 router.delete('/:id', authenticate, requireRole('admin'), (req, res) => subscriptionController.delete(req, res));
 router.post('/:id/renew', authenticate, requireRole('admin'), (req, res) => subscriptionController.renew(req, res));
+router.patch('/:id/status', authenticate, requireRole('admin'), validateBody(statusSchema), (req, res) => subscriptionController.changeStatus(req, res));
 
 export default router;

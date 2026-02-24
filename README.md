@@ -84,6 +84,7 @@ Gestionado por administradores.
       "cutDate": "YYYY-MM-DD",
       "plan": "Plan Name",
       "amount": "$100.00",
+      "kitNumber": "KIT4M01422983C2H", // opcional; si no se proporciona será "Valor No Disponible"
       "country": "VES"
     }
     ```
@@ -96,8 +97,13 @@ Gestionado por administradores.
 - **`DELETE /subscriptions/:id`**
   - **Uso:** Eliminar permanentemente una suscripción (Admin).
 - **`PATCH /subscriptions/:id`**
-  - **Body:** Campos a actualizar (`startDate`, `cutDate`, `plan`, `amount`).
-  - **Uso:** Actualizar información de la suscripción.
+  - **Body:** Campos a actualizar (`startDate`, `cutDate`, `plan`, `amount`, `kitNumber`).
+    - **Nota:** No permite cambiar `status`. Para cambiar el estado use `PATCH /subscriptions/:id/status`.
+  - **Uso:** Actualizar información de la suscripción (no incluye cambio de `status`).
+- **`PATCH /subscriptions/:id/status`**
+  - **Body:** `{ "status": "active|about_to_expire|suspended|paused|cancelled" }`
+  - **Uso:** Cambiar únicamente el `status` de la suscripción. Requiere rol `admin`.
+  - **Nota:** Este es el único endpoint que puede modificar el `status`.
 
 ### Comunicaciones (`/communications`)
 - **`GET /communications/conversations`** (Admin/Staff)
@@ -127,6 +133,12 @@ Gestionado por administradores.
   - **Body:** `{ "reason": "manual-check" }` (opcional).
   - **Uso:** Ejecutar manualmente el job diario que verifica vencimientos y envía recordatorios.
 
+  - **Reglas de estado automáticas (resumen):**
+    - Al crear la suscripción: `active`.
+    - Si pasan 1 mes desde el `cutDate` sin renovación: el job marcará `about_to_expire` ("Por vencer").
+    - Si pasan 2 meses desde el `cutDate` sin renovación: el job marcará `suspended` ("Suspendida") y enviará el aviso correspondiente.
+    - `paused` y `cancelled` son estados que pueden establecerse por petición del cliente o por admin, y no son sobreescritos automáticamente por la regla de mora.
+
 ## 6. Modelos de Datos (Resumen)
 
 ### Conversation
@@ -145,7 +157,7 @@ Ahora las conversaciones son independientes de los clientes.
 ```
 
 ### Subscription
-- **Estado:** `active`, `inactive`, `past_due`, `cancelled`.
+- **Estado:** `active`, `about_to_expire`, `suspended`, `paused`, `cancelled`.
 - **Fechas:** Formato ISO `YYYY-MM-DD` para `startDate` y `cutDate`.
 - **Amount:** Cadena con formato moneda (ej. `$50.00`).
 

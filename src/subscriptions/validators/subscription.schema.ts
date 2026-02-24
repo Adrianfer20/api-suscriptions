@@ -26,6 +26,7 @@ export const createSubscriptionSchema = z
     plan: z.string().trim().min(1),
     amount: amountSchema,
     passwordSub: z.string().trim().min(1).optional(),
+    kitNumber: z.string().trim().min(1).optional(),
     country: z.string().trim().min(1)
   })
   .strict();
@@ -36,6 +37,7 @@ export const updateSubscriptionSchema = z
     cutDate: isoDateSchema.optional(),
     plan: z.string().trim().min(1).optional(),
     amount: amountSchema.optional(),
+    kitNumber: z.string().trim().min(1).optional(),
     passwordSub: z.string().trim().min(1).optional(),
     country: z.string().trim().min(1).optional()
   })
@@ -46,3 +48,11 @@ export const updateSubscriptionSchema = z
 
 export type CreateSubscriptionInput = z.infer<typeof createSubscriptionSchema>;
 export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
+
+export const statusSchema = z
+  .object({
+    status: z.enum(['active', 'about_to_expire', 'suspended', 'paused', 'cancelled'])
+  })
+  .strict();
+
+export type StatusInput = z.infer<typeof statusSchema>;
