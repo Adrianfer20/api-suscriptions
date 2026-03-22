@@ -133,6 +133,9 @@ class AutomationService {
     await this.processMonth1Overdue(addMonthsTZ(todayIso, -1), dryRun, result);
     await this.processMonth2Overdue(addMonthsTZ(todayIso, -2), dryRun, result);
 
+    // 5. Reminder for about_to_expire subscriptions (3 days before 2nd month deadline)
+    await this.processAboutToExpireReminder(addMonthsTZ(todayIso, -1), dryRun, result);
+
     await this.writeRunLog(result, startedAt, options);
     return result;
   }
@@ -279,6 +282,41 @@ class AutomationService {
           result.subscriptionsCut++;
         } catch (err: any) {
           result.errors.push({ subscriptionId: sub.id, action: 'mark-suspended', message: err.message });
+        }
+      }
+      result.actionDetails.push(detail);
+    }
+  }
+
+  // --- Step 5: Recordatorio para suscripciones por vencer (3 días antes de suspenderse) ---
+  private async processAboutToExpireReminder(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
+    // Buscar suscripciones con status 'about_to_expire' donde cutDate == hace 1 mes (van a suspenderse en 3 días)
+    const allSubs = await this.subscriptionsCollection().get();
+    const filteredDocs = allSubs.docs.filter(doc => {
+      const data = doc.data();
+      return data.status === 'about_to_expire' && data.cutDate <= targetCutDate;
+    });
+
+    for (const doc of filteredDocs) {
+      const sub = { id: doc.id, ...(doc.data() as Subscription) };
+      result.processedCount++;
+      const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
+
+      if (dryRun) {
+        detail.actions.push('notify-about_to_expire-3days (dry-run)');
+        result.notificationsSent++;
+      } else {
+        try {
+          // Enviar recordatorio de suspensión próxima
+          await communicationsService.sendTemplate(sub.clientId, 'subscription_about_to_expire_reminder_2v', {
+            name: 'Cliente',
+            dueDate: sub.cutDate,
+            kitNumber: sub.kitNumber || 'N/A'
+          });
+          detail.actions.push('notify-about_to_expire-3days');
+          result.notificationsSent++;
+        } catch (err: any) {
+          result.errors.push({ subscriptionId: sub.id, action: 'notify-about_to_expire-3days', message: err.message });
         }
       }
       result.actionDetails.push(detail);
