@@ -11,6 +11,7 @@ import authRoutes from './auth/routes/auth.routes';
 import clientsRoutes from './clients/routes/client.routes';
 import subscriptionsRoutes from './subscriptions/routes/subscription.routes';
 import communicationsRoutes from './communications/routes/communications.routes';
+import notificationRoutes from './notifications/routes/notification.routes';
 import automationRoutes from './automation/routes/automation.routes';
 import { paymentRoutes } from './payments/routes';
 import { startDailyAutomationJob } from './automation/jobs/daily.job';
@@ -102,6 +103,9 @@ app.use('/subscriptions', subscriptionsRoutes);
 
 // Mount communications module
 app.use('/communications', communicationsRoutes);
+
+// Mount notifications module
+app.use('/notifications', notificationRoutes);
 
 // Mount automation module
 app.use('/automation', automationRoutes);

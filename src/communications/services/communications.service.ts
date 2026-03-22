@@ -6,6 +6,7 @@ import { TWILIO_CONFIG } from '../../config/index';
 import templates, { getMissingTemplateVariables, renderContentVariables } from '../templates';
 import { Message } from '../models/message.model';
 import type { Subscription } from '../../subscriptions/models/subscription.model';
+import notificationService from '../../notifications/notification.service';
 
 class CommunicationsService {
     // Helpers para colecciones Firestore
@@ -489,6 +490,37 @@ class CommunicationsService {
 
     // Use set with merge to create or update
     await conversationRef.set(conversationData, { merge: true });
+
+    // Enviar notificación push al cliente
+    // Solo enviar si el cliente no es 'unknown' (es decir, es un cliente registrado)
+    if (clientId !== 'unknown') {
+      try {
+        const notificationPayload = {
+          title: `Mensaje de ${clientName}`,
+          body: Body || '(Mensaje de voz o multimedia)',
+          data: {
+            type: 'whatsapp_message',
+            conversationId: fromPhone,
+            clientId: clientId,
+            messageId: docRef.id
+          },
+          tag: `whatsapp-${fromPhone}`,
+          clickAction: 'OPEN_CONVERSATION'
+        };
+
+        const notificationResult = await notificationService.sendToClient(clientId, notificationPayload);
+        
+        if (notificationResult.success > 0) {
+          console.log(`[Notifications] Sent ${notificationResult.success} push notification(s) to client ${clientId}`);
+        }
+        if (notificationResult.failed > 0) {
+          console.warn(`[Notifications] Failed to send ${notificationResult.failed} notifications:`, notificationResult.errors);
+        }
+      } catch (notifError: any) {
+        // No fallar el webhook por errores de notificaciones
+        console.error('[Notifications] Error sending push notification:', notifError?.message || notifError);
+      }
+    }
 
     return { id: docRef.id, ...incomingMsg };
   }
