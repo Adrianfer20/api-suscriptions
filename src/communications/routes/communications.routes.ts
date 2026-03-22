@@ -8,8 +8,11 @@ import { allowedTemplates } from '../templates';
 
 const router = Router();
 
-// POST /communications/webhook (Public for Twilio)
+// POST /communications/webhook (Public for Twilio - incoming messages)
 router.post('/webhook', (req: Request, res: Response) => communicationsController.webhook(req, res));
+
+// POST /communications/webhook-status (Public for Twilio - status callbacks)
+router.post('/webhook-status', (req: Request, res: Response) => communicationsController.webhookStatus(req, res));
 
 // GET /communications/conversations (Admin/Staff)
 router.get(
@@ -87,6 +90,16 @@ router.get(
   [param('phone').isString().notEmpty()],
   validateRequest,
   (req: Request, res: Response) => communicationsController.getSubscriptions(req, res)
+);
+
+// DELETE /communications/conversations/:phone (Admin) - Delete conversation and messages
+router.delete(
+  '/conversations/:phone',
+  authenticate,
+  requireRole('admin'),
+  [param('phone').isString().notEmpty()],
+  validateRequest,
+  (req: Request, res: Response) => communicationsController.deleteConversation(req, res)
 );
 
 export default router;

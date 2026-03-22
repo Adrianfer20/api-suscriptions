@@ -134,6 +134,9 @@ Gestionado por administradores.
   - **Uso:** Obtener lista de suscripciones vinculadas a un teléfono.
 - **`POST /communications/webhook`**
   - **Uso:** Endpoint público (Twilio) para recibir mensajes. Crea una conversación "Desconocido" si el número no es cliente.
+- **`POST /communications/webhook-status`**
+  - **Uso:** Endpoint público (Twilio) para recibir status callbacks. Actualiza el estado del mensaje (sent, delivered, read, failed).
+  - **Twilio config:** Debes configurar la Status Callback URL en tu console de Twilio.
 
 ### Automatización (`/automation`)
 - **`POST /automation/run-daily`** (Admin)
@@ -172,6 +175,10 @@ Las conversaciones soportan múltiples suscripciones por teléfono (ej. cliente 
 
 ### Client
 - **Phone:** Formato E.164 (ej. `+521234567890`).
+
+### Message (WhatsApp)
+- **Estados:** `queued` → `sent` → `delivered` → `read` (o `failed`)
+- **Twilio callbacks:** El status se actualiza automáticamente vía webhook
 
 ### Payment
 - **Estados:** `pending`, `verified`, `rejected`

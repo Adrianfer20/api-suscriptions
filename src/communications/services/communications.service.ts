@@ -633,6 +633,139 @@ class CommunicationsService {
     const data = convDoc.data();
     return data?.subscriptionIds || [];
   }
+
+  /**
+   * Maneja los status callbacks de Twilio
+   * Actualiza el estado del mensaje cuando Twilio notifica cambios
+   */
+  async handleStatusCallback(payload: any) {
+    if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    
+    // Twilio envía: MessageSid, MessageStatus, ErrorCode, ErrorMessage
+    const { MessageSid, MessageStatus, ErrorCode, ErrorMessage } = payload;
+    
+    if (!MessageSid) {
+      console.warn('[StatusCallback] No MessageSid provided');
+      return;
+    }
+    
+    // Map Twilio status to our status
+    const statusMap: Record<string, string> = {
+      'queued': 'queued',
+      'sent': 'sent',
+      'delivered': 'delivered',
+      'undelivered': 'failed',
+      'failed': 'failed',
+      'read': 'read'
+    };
+    
+    const newStatus = statusMap[MessageStatus] || MessageStatus;
+    
+    console.log(`[StatusCallback] Message ${MessageSid}: ${MessageStatus} -> ${newStatus}`);
+    
+    // Buscar el mensaje por twilioSid
+    const messagesQuery = await this.messagesCollection()
+      .where('twilioSid', '==', MessageSid)
+      .limit(1)
+      .get();
+    
+    if (messagesQuery.empty) {
+      console.warn(`[StatusCallback] Message not found: ${MessageSid}`);
+      return;
+    }
+    
+    const messageDoc = messagesQuery.docs[0];
+    const currentData = messageDoc.data();
+    
+    // Solo actualizar si es un cambio válido
+    const validTransitions: Record<string, string[]> = {
+      'queued': ['sent'],
+      'sent': ['delivered', 'failed'],
+      'delivered': ['read'],
+      'failed': [],
+      'read': []
+    };
+    
+    const currentStatus = currentData.status;
+    const allowedStatuses = validTransitions[currentStatus] || [];
+    
+    if (!allowedStatuses.includes(newStatus) && currentStatus !== newStatus) {
+      console.log(`[StatusCallback] Invalid transition: ${currentStatus} -> ${newStatus}, skipping`);
+      return;
+    }
+    
+    // Actualizar el mensaje
+    const updateData: any = {
+      status: newStatus,
+      updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    if (ErrorCode) {
+      updateData.error = { code: ErrorCode, message: ErrorMessage };
+    }
+    
+    await messageDoc.ref.update(updateData);
+    
+    // Si el mensaje fue leído, actualizar también la conversación
+    if (newStatus === 'read' && currentData.to) {
+      const convRef = this.conversationsCollection().doc(currentData.to);
+      const convDoc = await convRef.get();
+      if (convDoc.exists) {
+        await convRef.update({
+          unreadCount: firebaseAdmin.firestore.FieldValue.increment(-1)
+        });
+      }
+    }
+    
+    console.log(`[StatusCallback] Updated message ${MessageSid} to status: ${newStatus}`);
+  }
+
+  /**
+   * Elimina una conversación y sus mensajes asociados
+   */
+  async deleteConversation(phone: string) {
+    if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    
+    const normalizedPhone = phone.replace(/[\s()-]/g, '');
+    if (!/^\+?[0-9]{7,15}$/.test(normalizedPhone)) {
+      throw new Error('Invalid phone number format');
+    }
+
+    const convRef = this.conversationsCollection().doc(normalizedPhone);
+    const convDoc = await convRef.get();
+    
+    if (!convDoc.exists) {
+      throw new Error('Conversación no encontrada');
+    }
+
+    // Eliminar todos los mensajes de esta conversación
+    const messagesQuery = await this.messagesCollection()
+      .where('to', '==', normalizedPhone)
+      .get();
+    
+    const batch = firebaseAdmin.firestore().batch();
+    
+    // Eliminar mensajes enviados a este número
+    messagesQuery.docs.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    
+    // También eliminar mensajes recibidos de este número
+    const incomingMessages = await this.messagesCollection()
+      .where('from', '==', normalizedPhone)
+      .get();
+    
+    incomingMessages.docs.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    
+    // Eliminar la conversación
+    batch.delete(convRef);
+    
+    await batch.commit();
+    
+    return { ok: true, phone: normalizedPhone };
+  }
 }
 
 

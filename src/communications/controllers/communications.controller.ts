@@ -52,6 +52,29 @@ class CommunicationsController {
     }
   }
 
+  async webhookStatus(req: Request, res: Response) {
+    try {
+      const payload = req.body;
+      await communicationsService.handleStatusCallback(payload);
+      return res.status(200).send('OK');
+    } catch (err: any) {
+      console.error('Status webhook error:', err);
+      return res.status(200).send('OK'); // Always return 200 to Twilio
+    }
+  }
+
+  async deleteConversation(req: Request, res: Response) {
+    try {
+      let phone = req.params.phone as string;
+      if (!phone) return res.status(400).json({ ok: false, message: 'phone required' });
+      if (Array.isArray(phone)) phone = phone[0];
+      await communicationsService.deleteConversation(phone);
+      return res.json({ ok: true, message: 'Conversación eliminada' });
+    } catch (err: any) {
+      return res.status(400).json({ ok: false, message: err?.message || 'Failed to delete conversation' });
+    }
+  }
+
   async getConversations(req: Request, res: Response) {
     try {
         const limit = req.query.limit ? Number(req.query.limit) : 20;
