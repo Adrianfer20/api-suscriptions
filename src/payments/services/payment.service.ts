@@ -3,6 +3,9 @@ import type { firestore } from 'firebase-admin';
 import { PaymentModel } from '../models/payment.model';
 import { CreatePaymentInput, PaymentFiltersInput } from '../validators/payment.schema';
 import { PaymentStatus, PAYMENT_METHOD_REQUIREMENTS } from '../types';
+import { addMonthsTZ, startOfDayTZ } from '../../subscriptions/utils/date.util';
+
+const DEFAULT_TIMEZONE = process.env.AUTOMATION_TZ || 'America/Caracas';
 
 class PaymentService {
   private collection() {
@@ -18,25 +21,30 @@ class PaymentService {
   /**
    * Obtiene las fechas de inicio y fin del período mensual actual
    * basado en el cutDate de la suscripción
+   * Usa la zona horaria de Venezuela (America/Caracas)
    */
   private getCurrentMonthPeriod(cutDate: string): { startDate: Date; endDate: Date } {
-    const today = new Date();
-    const cutDay = parseInt(cutDate, 10);
+    // Usar la utilidad de fecha con timezone
+    const todayIso = startOfDayTZ(new Date(), DEFAULT_TIMEZONE);
+    const cutDay = parseInt(cutDate.split('-')[2] || '1', 10);
     
-    let startDate: Date;
-    let endDate: Date;
+    let periodStart: string;
+    let periodEnd: string;
     
-    if (today.getDate() >= cutDay) {
-      // Estamos después del cutDate, el período actual es cutDate actual -> próximo cutDate
-      startDate = new Date(today.getFullYear(), today.getMonth(), cutDay);
-      endDate = new Date(today.getFullYear(), today.getMonth() + 1, cutDay);
+    if (todayIso >= cutDate) {
+      // Estamos en o después del cutDate, el período actual es cutDate actual -> próximo cutDate
+      periodStart = cutDate;
+      periodEnd = addMonthsTZ(cutDate, 1, DEFAULT_TIMEZONE);
     } else {
       // Estamos antes del cutDate, el período actual es cutDate pasado -> cutDate actual
-      startDate = new Date(today.getFullYear(), today.getMonth() - 1, cutDay);
-      endDate = new Date(today.getFullYear(), today.getMonth(), cutDay);
+      periodStart = addMonthsTZ(cutDate, -1, DEFAULT_TIMEZONE);
+      periodEnd = cutDate;
     }
     
-    return { startDate, endDate };
+    return { 
+      startDate: new Date(periodStart + 'T00:00:00Z'), 
+      endDate: new Date(periodEnd + 'T00:00:00Z') 
+    };
   }
 
   /**
@@ -388,40 +396,38 @@ class PaymentService {
         status: 'active',
       };
 
-      // Si el monthly amount está completamente pagado, avanzar cutDate
-      // Simplificado: solo verificar si la suma total de pagos (sin período) >= monthlyAmount
       const monthlyAmountValue = parseFloat(subscription?.amount?.replace(/[^0-9.-]/g, '') || '0');
+      const currentCutDate = subscription?.cutDate || '';
       
-      // Obtener todos los pagos verificados de esta suscripción
-      const allPaymentsSnap = await this.collection()
-        .where('subscriptionId', '==', payment.subscriptionId)
-        .where('status', '==', 'verified')
-        .get();
+      // Obtener pagos verificados del PERÍODO ACTUAL (desde último cutDate)
+      const currentPeriodTotal = await this.getVerifiedPaymentsInCurrentPeriod(payment.subscriptionId, currentCutDate);
       
-      let allVerifiedTotal = 0;
-      allPaymentsSnap.docs.forEach((doc) => {
-        const data = doc.data();
-        allVerifiedTotal += data.amount || 0;
+      // Incluir el pago que se está verificando
+      const currentPeriodTotalWithCurrent = currentPeriodTotal + payment.amount;
+      
+      console.log('[PaymentService] Verificando cutDate:', { 
+        currentPeriodTotal, 
+        paymentAmount: payment.amount, 
+        total: currentPeriodTotalWithCurrent, 
+        monthlyAmountValue,
+        currentCutDate
       });
       
-      // Si todos los pagos verificados cubren el mes, avanzar cutDate
-      // INCLUIR el pago que se está verificando actualmente
-      const allVerifiedTotalWithCurrent = allVerifiedTotal + payment.amount;
-      console.log('[PaymentService] Verificando cutDate:', { allVerifiedTotal, paymentAmount: payment.amount, total: allVerifiedTotalWithCurrent, monthlyAmountValue });
-      
-      if (monthlyAmountValue > 0 && allVerifiedTotalWithCurrent >= monthlyAmountValue) {
-        console.log('[PaymentService] Actualizando cutDate - Pago completo');
-        const cutDateParts = (subscription?.cutDate || '').split('-');
-        const day = cutDateParts.length === 3 ? parseInt(cutDateParts[2], 10) : 1;
-        const today = new Date();
+      // Solo avanzar cutDate si el período actual está completamente pagado
+      if (monthlyAmountValue > 0 && currentPeriodTotalWithCurrent >= monthlyAmountValue) {
+        console.log('[PaymentService] Actualizando cutDate - Pago completo del período');
         
-        // Calcular nuevo cutDate (mes siguiente)
-        const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, day);
-        const newCutDate = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        // Usar addMonthsTZ para calcular el próximo cutDate correctamente
+        // Avanzamos 1 mes desde el cutDate actual
+        const newCutDate = addMonthsTZ(currentCutDate, 1, DEFAULT_TIMEZONE);
         
         updateSubscriptionData.cutDate = newCutDate;
+        console.log('[PaymentService] Nuevo cutDate:', newCutDate);
       } else {
-        console.log('[PaymentService] NO actualiza cutDate:', { allVerifiedTotal, monthlyAmountValue });
+        console.log('[PaymentService] NO actualiza cutDate: período no completo', { 
+          currentPeriodTotal: currentPeriodTotal + payment.amount, 
+          monthlyAmount: monthlyAmountValue 
+        });
       }
 
       console.log('[PaymentService] updateSubscriptionData:', updateSubscriptionData);
