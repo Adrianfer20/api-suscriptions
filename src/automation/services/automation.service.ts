@@ -211,15 +211,17 @@ class AutomationService {
     }
   }
 
-  // --- Step 3: Suspended Notice (Day +1) ---
+  // --- Step 3: 1 mes después del corte ---
   private async processMonth1Overdue(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
     // 1 month after cutDate -> mark as about_to_expire and notify
-    const snapshot = await this.subscriptionsCollection()
-      .where('status', '==', 'active')
-      .where('cutDate', '==', targetCutDate)
-      .get();
+    // Buscar suscripciones donde cutDate <= fecha de hace 1 mes (ya pasó el corte)
+    const allSubs = await this.subscriptionsCollection().get();
+    const filteredDocs = allSubs.docs.filter(doc => {
+      const data = doc.data();
+      return data.status === 'active' && data.cutDate <= targetCutDate;
+    });
 
-    for (const doc of snapshot.docs) {
+    for (const doc of filteredDocs) {
       const sub = { id: doc.id, ...(doc.data() as Subscription) };
       result.processedCount++;
       const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
@@ -240,11 +242,14 @@ class AutomationService {
 
   private async processMonth2Overdue(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
     // 2 months after cutDate -> mark as suspended and notify
-    const snapshot = await this.subscriptionsCollection()
-      .where('cutDate', '==', targetCutDate)
-      .get();
+    // Buscar suscripciones donde cutDate <= fecha de hace 2 meses
+    const allSubs = await this.subscriptionsCollection().get();
+    const filteredDocs = allSubs.docs.filter(doc => {
+      const data = doc.data();
+      return data.cutDate <= targetCutDate;
+    });
 
-    for (const doc of snapshot.docs) {
+    for (const doc of filteredDocs) {
       const sub = { id: doc.id, ...(doc.data() as Subscription) };
       // skip if already suspended/cancelled/paused
       if (sub.status === 'suspended' || sub.status === 'cancelled' || sub.status === 'paused') continue;
