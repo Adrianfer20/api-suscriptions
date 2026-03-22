@@ -92,8 +92,10 @@ Gestionado por administradores.
   - **Query:** `limit`, `startAfter`.
 - **`GET /subscriptions/:id`**
   - **Uso:** Ver detalles de una suscripción.
-- **`POST /subscriptions/:id/renew`**
-  - **Uso:** Renovar una suscripción manualmente (extiende la fecha de corte).
+- **`POST /subscriptions/:id/renew`** (Admin)
+  - **Uso:** Renovar una suscripción manualmente (extiende la fecha de corte al mes siguiente).
+  - **Validación:** Solo permite adelantar si la fecha actual es mayor al cutDate.
+  - **Error:** "La fecha de corte aún no ha vencido. No se puede adelantar."
 - **`DELETE /subscriptions/:id`**
   - **Uso:** Eliminar permanentemente una suscripción (Admin).
 - **`PATCH /subscriptions/:id`**
@@ -175,6 +177,21 @@ Las conversaciones soportan múltiples suscripciones por teléfono (ej. cliente 
 - **Estados:** `pending`, `verified`, `rejected`
 - **Métodos:** `bank_transfer`, `payment_link`, `cash`, `free`
 - **Moneda:** `USD` o `VES`
+
+### Formato de Fechas
+- **startDate, cutDate:** Formato `YYYY-MM-DD` (ISO sin hora)
+- **Zona horaria:** `America/Caracas` (Venezuela)
+
+### Lógica de cutDate con Pagos
+Cuando se verifica un pago:
+1. Se valida que el monto cubra el período actual
+2. Si está completo, el cutDate avanza 1 mes desde el corte actual
+3. El estado cambia a `active`
+
+### Renew Manual
+- **Endpoint:** `POST /subscriptions/:id/renew`
+- Solo permite adelantar si `hoy > cutDate`
+- Útil cuando hay pagos en efectivo no registrados
 
 ## 7. Casos de Uso Especiales
 
