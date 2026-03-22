@@ -108,6 +108,13 @@ class SubscriptionService {
     if (!doc.exists) throw new Error('Subscription not found');
     const current = doc.data() as any;
     const baseCut = current.cutDate ? String(current.cutDate) : startOfDayTZ(new Date());
+    
+    // Verificar si la fecha actual es mayor a la fecha de corte
+    const today = startOfDayTZ(new Date());
+    if (today < baseCut) {
+      throw new Error('La fecha de corte aún no ha vencido. No se puede adelantar.');
+    }
+    
     const nextCutIso = addMonthsTZ(baseCut, 1);
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
