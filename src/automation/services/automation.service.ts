@@ -156,7 +156,8 @@ class AutomationService {
         try {
           await communicationsService.sendTemplate(sub.clientId, 'subscription_reminder_3days_2v', {
             name: 'Cliente', 
-            dueDate: sub.cutDate
+            dueDate: sub.cutDate,
+            kitNumber: sub.kitNumber || 'N/A'
           });
           detail.actions.push('notify-reminder-3days');
           result.notificationsSent++;
@@ -192,7 +193,8 @@ class AutomationService {
           await communicationsService.sendTemplate(sub.clientId, 'subscription_cutoff_day_2v', {
             name: 'Cliente',
             subscriptionLabel: this.subscriptionPlan(sub),
-            cutoffDate: sub.cutDate
+            cutoffDate: sub.cutDate,
+            kitNumber: sub.kitNumber || 'N/A'
           });
           detail.actions.push('notify-cutoff-day');
           result.notificationsSent++;
@@ -260,7 +262,8 @@ class AutomationService {
           try {
             await communicationsService.sendTemplate(sub.clientId, 'subscription_suspended_notice_2v', {
               name: 'Cliente',
-              subscriptionLabel: this.subscriptionPlan(sub)
+              subscriptionLabel: this.subscriptionPlan(sub),
+              kitNumber: sub.kitNumber || 'N/A'
             });
             detail.actions.push('notify-suspended');
             result.notificationsSent++;

@@ -2,6 +2,7 @@ import firebaseAdmin from '../../config/firebaseAdmin';
 import type { firestore } from 'firebase-admin';
 import { Subscription } from '../models/subscription.model';
 import { addMonthsTZ, startOfDayTZ } from '../utils/date.util';
+import communicationsService from '../../communications/services/communications.service';
 
 class SubscriptionService {
   private collection() {
@@ -16,13 +17,23 @@ class SubscriptionService {
 
   async create(data: Pick<Subscription, 'clientId' | 'startDate' | 'cutDate' | 'plan' | 'amount' | 'passwordSub' | 'kitNumber'>) {
     // validate client exists (by doc id or uid)
-    const byId = await this.clientsCollection().doc(data.clientId).get();
-    let clientExists = byId.exists;
+    let clientDoc = await this.clientsCollection().doc(data.clientId).get();
+    let clientExists = clientDoc.exists;
+    let clientPhone = '';
+    
     if (!clientExists) {
       const q = await this.clientsCollection().where('uid', '==', data.clientId).limit(1).get();
-      clientExists = !q.empty;
+      if (!q.empty) {
+        clientDoc = q.docs[0];
+        clientExists = true;
+      }
     }
+    
     if (!clientExists) throw new Error('Client not found');
+    
+    // Get client's phone for linking to conversation
+    const clientData = clientDoc.data();
+    clientPhone = clientData?.phone || '';
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
@@ -43,7 +54,18 @@ class SubscriptionService {
       updatedAt: now
     });
     const snap = await docRef.get();
-    return { id: docRef.id, ...(snap.data() as any) } as Subscription;
+    const newSubscription = { id: docRef.id, ...(snap.data() as any) } as Subscription;
+    
+    // Link subscription to conversation if client has phone
+    if (clientPhone && communicationsService) {
+      try {
+        await communicationsService.linkSubscriptionsToConversation(clientPhone, [docRef.id]);
+      } catch (err) {
+        console.warn('Failed to link subscription to conversation:', err);
+      }
+    }
+    
+    return newSubscription;
   }
 
   async list(limit?: number, startAfterId?: string) {

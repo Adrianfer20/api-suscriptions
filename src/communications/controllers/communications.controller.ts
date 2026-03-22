@@ -73,6 +73,36 @@ class CommunicationsController {
         return res.status(500).json({ ok: false, message: err?.message || 'Failed to mark as read' });
     }
   }
+
+  async linkSubscriptions(req: Request, res: Response) {
+    try {
+      const { phone, subscriptionIds } = req.body as {
+        phone: string;
+        subscriptionIds: string[];
+      };
+      if (!phone) return res.status(400).json({ ok: false, message: 'phone required' });
+      if (!subscriptionIds || !Array.isArray(subscriptionIds)) {
+        return res.status(400).json({ ok: false, message: 'subscriptionIds array required' });
+      }
+      const result = await communicationsService.linkSubscriptionsToConversation(phone, subscriptionIds);
+      return res.json({ ok: true, data: result });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, message: err?.message || 'Failed to link subscriptions' });
+    }
+  }
+
+  async getSubscriptions(req: Request, res: Response) {
+    try {
+      let phone = req.params.phone as string;
+      if (!phone) return res.status(400).json({ ok: false, message: 'phone required' });
+      // Handle array case
+      if (Array.isArray(phone)) phone = phone[0];
+      const subscriptionIds = await communicationsService.getSubscriptionsByPhone(phone);
+      return res.json({ ok: true, data: subscriptionIds });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, message: err?.message || 'Failed to get subscriptions' });
+    }
+  }
 }
 
 const communicationsController = new CommunicationsController();

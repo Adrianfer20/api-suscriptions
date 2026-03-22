@@ -119,6 +119,10 @@ class CommunicationsService {
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
 
     // Update conversation metadata (siempre, para mantener el historial y nombre actualizado)
+    // Preserve existing subscriptionIds if already present
+    const existingConv = await this.conversationsCollection().doc(toPhone).get();
+    const existingData = existingConv.exists ? existingConv.data() : {};
+    
     await this.conversationsCollection().doc(toPhone).set({
         clientId: resolvedClientId !== 'unknown' ? resolvedClientId : undefined,
         name: clientName || `Desconocido ${toPhone}`,
@@ -127,7 +131,9 @@ class CommunicationsService {
         lastMessageBody: `Template: ${templateName}`,
         lastMessageDir: 'outbound',
         prospect: resolvedClientId === 'unknown',
-        unreadCount: 0
+        unreadCount: 0,
+        // Preserve existing subscriptionIds, initialize if new conversation
+        subscriptionIds: existingData?.subscriptionIds || []
     }, { merge: true });
 
     try {
@@ -575,6 +581,57 @@ class CommunicationsService {
     }
 
     return { ok: true, phone };
+  }
+
+  /**
+   * Vincula una o más suscripciones a una conversación existente (por teléfono)
+   * Útil cuando un cliente tiene múltiples antenas/suscripciones con el mismo teléfono
+   */
+  async linkSubscriptionsToConversation(phone: string, subscriptionIds: string[]) {
+    if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    
+    const normalizedPhone = phone.replace(/[\s()-]/g, '');
+    if (!/^\+?[0-9]{7,15}$/.test(normalizedPhone)) {
+      throw new Error('Invalid phone number format');
+    }
+
+    const convRef = this.conversationsCollection().doc(normalizedPhone);
+    const convDoc = await convRef.get();
+    
+    let existingSubscriptionIds: string[] = [];
+    if (convDoc.exists) {
+      const data = convDoc.data();
+      existingSubscriptionIds = data?.subscriptionIds || [];
+    }
+
+    // Agregar las nuevas suscripciones, evitando duplicados
+    const newSubscriptionIds = [...new Set([...existingSubscriptionIds, ...subscriptionIds])];
+    
+    await convRef.set({
+      subscriptionIds: newSubscriptionIds,
+      updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    return { 
+      ok: true, 
+      phone: normalizedPhone, 
+      subscriptionIds: newSubscriptionIds 
+    };
+  }
+
+  /**
+   * Obtiene las suscripciones vinculadas a una conversación
+   */
+  async getSubscriptionsByPhone(phone: string) {
+    const normalizedPhone = phone.replace(/[\s()-]/g, '');
+    const convDoc = await this.conversationsCollection().doc(normalizedPhone).get();
+    
+    if (!convDoc.exists) {
+      return [];
+    }
+    
+    const data = convDoc.data();
+    return data?.subscriptionIds || [];
   }
 }
 

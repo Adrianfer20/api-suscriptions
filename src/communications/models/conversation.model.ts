@@ -8,4 +8,6 @@ export interface Conversation {
   lastMessageDir?: 'inbound' | 'outbound';
   unreadCount: number;
   prospect: boolean; // True if not a registered client, false if registered
+  // Support for multiple subscriptions per phone (e.g., multiple Starlink antennas)
+  subscriptionIds?: string[]; // Array of subscription IDs linked to this conversation
 }

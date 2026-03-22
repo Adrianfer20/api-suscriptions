@@ -66,4 +66,27 @@ router.post(
   (req: Request, res: Response) => communicationsController.markAsRead(req, res)
 );
 
+// POST /communications/subscriptions/link (Admin) - Link subscriptions to a phone/conversation
+router.post(
+  '/subscriptions/link',
+  authenticate,
+  requireRole('admin'),
+  [
+    body('phone').isString().notEmpty(),
+    body('subscriptionIds').isArray({ min: 1 })
+  ],
+  validateRequest,
+  (req: Request, res: Response) => communicationsController.linkSubscriptions(req, res)
+);
+
+// GET /communications/subscriptions/:phone (Admin/Staff) - Get subscriptions linked to a phone
+router.get(
+  '/subscriptions/:phone',
+  authenticate,
+  requireRole('admin', 'staff'),
+  [param('phone').isString().notEmpty()],
+  validateRequest,
+  (req: Request, res: Response) => communicationsController.getSubscriptions(req, res)
+);
+
 export default router;

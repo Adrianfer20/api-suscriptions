@@ -117,13 +117,19 @@ Gestionado por administradores.
   - **Param :id:** Puede ser el `clientId` o el `phoneNumber`.
   - **Uso:** Marcar todos los mensajes entrantes como leídos.
 - **`POST /communications/send-template`** (Admin)
-  - **Body:** `{ "clientId": "...", "template": "nombre_plantilla" }`
+  - **Body:** `{ "clientId": "...", "template": "nombre_plantilla", "templateData": { ... } }`
   - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para enviar a prospectos.
   - **Uso:** Enviar plantillas WhatsApp a Clientes o Prospectos.
 - **`POST /communications/send`** (Admin/Staff)
   - **Body:** `{ "clientId": "...", "body": "Texto libre..." }`
   - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para chatear con prospectos.
   - **Uso:** Responder con texto libre (requiere sesión abierta 24h).
+- **`POST /communications/subscriptions/link`** (Admin)
+  - **Body:** `{ "phone": "+521234567890", "subscriptionIds": ["sub1", "sub2"] }`
+  - **Uso:** Vincular múltiples suscripciones a una conversación (para clientes con varias antenas).
+- **`GET /communications/subscriptions/:phone`** (Admin/Staff)
+  - **Param :phone:** Número de teléfono en formato E.164.
+  - **Uso:** Obtener lista de suscripciones vinculadas a un teléfono.
 - **`POST /communications/webhook`**
   - **Uso:** Endpoint público (Twilio) para recibir mensajes. Crea una conversación "Desconocido" si el número no es cliente.
 
@@ -142,17 +148,18 @@ Gestionado por administradores.
 ## 6. Modelos de Datos (Resumen)
 
 ### Conversation
-Ahora las conversaciones son independientes de los clientes.
+Las conversaciones soportan múltiples suscripciones por teléfono (ej. cliente con varias antenas Starlink).
 ```json
 {
   "id": "+521234567890", 
   "phone": "+521234567890",
   "name": "Cliente Nombre" || "WhatsApp Profile",
-  "clientId": "firebase_doc_id" || null, // null = Desconocido (Prospecto)
+  "clientId": "firebase_doc_id" || null,
   "prospect": true || false,
   "unreadCount": 1,
   "lastMessageAt": "Timestamp",
-  "lastMessageBody": "..."
+  "lastMessageBody": "...",
+  "subscriptionIds": ["sub_id_1", "sub_id_2"] // Array de suscripciones vinculadas
 }
 ```
 
@@ -164,7 +171,27 @@ Ahora las conversaciones son independientes de los clientes.
 ### Client
 - **Phone:** Formato E.164 (ej. `+521234567890`).
 
-## 7. Manejo de Errores
+### Payment
+- **Estados:** `pending`, `verified`, `rejected`
+- **Métodos:** `bank_transfer`, `payment_link`, `cash`, `free`
+- **Moneda:** `USD` o `VES`
+
+## 7. Casos de Uso Especiales
+
+### Múltiples Suscripciones por Teléfono
+Un cliente puede tener múltiples antenas/suscripciones con el mismo número de teléfono. El sistema:
+1. Vincula automáticamente las suscripciones al crear (`subscriptionIds` en Conversation)
+2. Incluye `kitNumber` en todas las notificaciones para identificar qué antena
+3. Permite vincular suscripciones existentes manualmente:
+   ```bash
+   POST /communications/subscriptions/link
+   {
+     "phone": "+584123456789",
+     "subscriptionIds": ["sub_id_1", "sub_id_2"]
+   }
+   ```
+
+## 8. Manejo de Errores
 
 Las respuestas de error siguen el formato:
 ```json
