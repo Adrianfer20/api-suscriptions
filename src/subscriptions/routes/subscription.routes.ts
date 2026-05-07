@@ -7,6 +7,9 @@ import { createSubscriptionSchema, updateSubscriptionSchema, statusSchema } from
 
 const router = Router();
 
+// Public endpoint: list available subscription plans for frontend
+router.get('/plans', (req, res) => subscriptionController.plans(req, res));
+
 // Only admin may manage subscriptions
 router.post('/', authenticate, requireRole('admin'), validateBody(createSubscriptionSchema), (req, res) => subscriptionController.create(req, res));
 router.get('/', authenticate, requireRole('admin', 'client'), (req, res) => subscriptionController.list(req, res));

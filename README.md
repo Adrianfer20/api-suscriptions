@@ -128,6 +128,22 @@ Gestionado por administradores.
   - **Uso:** Cambiar únicamente el `status` de la suscripción. Requiere rol `admin`.
   - **Nota:** Este es el único endpoint que puede modificar el `status`.
 
+### Planes disponibles
+
+El frontend puede obtener la lista de planes soportados por la API con el siguiente endpoint público:
+
+- **`GET /subscriptions/plans`**
+  - **Uso:** Devuelve un arreglo con los nombres de los planes que el usuario puede seleccionar al crear una suscripción.
+  - **Respuesta ejemplo:**
+    ```json
+    {
+      "ok": true,
+      "data": ["Itinerante Ilimitado", "Itinerante 100GB", "Residencial"]
+    }
+    ```
+
+Recomendación para el frontend: cachear esta lista en cliente (por ejemplo en Redux o contexto) y usarla para poblar selects de creación/edición de suscripciones.
+
 ### Comunicaciones (`/communications`)
 - **`GET /communications/conversations`** (Admin/Staff)
  - **`GET /communications/conversations`** (Admin only)

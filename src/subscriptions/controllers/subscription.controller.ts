@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import automationService from '../../automation/services/automation.service';
 import { Subscription } from '../models/subscription.model';
+import { Plan } from '../models/subscription.model';
 import subscriptionService from '../services/subscription.service';
 import type { CreateSubscriptionInput, UpdateSubscriptionInput } from '../validators/subscription.schema';
 
@@ -13,6 +14,12 @@ class SubscriptionController {
     } catch (err: any) {
       return res.status(400).json({ ok: false, message: err?.message || 'Unable to create subscription' });
     }
+  }
+
+  async plans(req: Request, res: Response) {
+    // Return the list of available plans for clients (frontend can fetch this)
+    const plans: Plan[] = ['Itinerante Ilimitado', 'Itinerante 100GB', 'Residencial'];
+    return res.json({ ok: true, data: plans });
   }
 
   async list(req: Request, res: Response) {
