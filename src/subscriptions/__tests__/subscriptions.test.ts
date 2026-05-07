@@ -11,7 +11,7 @@ describe('/subscriptions endpoints (unauthenticated)', () => {
         clientId: 'c',
         startDate: '2026-02-11',
         cutDate: '2026-03-11',
-        plan: 'basic',
+        plan: 'Itinerante Ilimitado',
         amount: '$50',
         country: 'VES',
       });
@@ -28,7 +28,7 @@ describe('/subscriptions endpoints (unauthenticated)', () => {
         clientId: 'c',
         startDate: '2026-02-11',
         cutDate: '2026-03-11',
-        plan: 'basic',
+        plan: 'Itinerante Ilimitado',
         amount: '$50',
         // country intentionally omitted
       });

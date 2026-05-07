@@ -23,7 +23,7 @@ export const createSubscriptionSchema = z
     clientId: z.string().trim().min(1),
     startDate: isoDateSchema,
     cutDate: isoDateSchema,
-    plan: z.string().trim().min(1),
+    plan: z.enum(['Itinerante Ilimitado', 'Itinerante 100GB', 'Residencial']),
     amount: amountSchema,
     passwordSub: z.string().trim().min(1).optional(),
     kitNumber: z.string().trim().min(1).optional(),
@@ -35,7 +35,7 @@ export const updateSubscriptionSchema = z
   .object({
     startDate: isoDateSchema.optional(),
     cutDate: isoDateSchema.optional(),
-    plan: z.string().trim().min(1).optional(),
+    plan: z.enum(['Itinerante Ilimitado', 'Itinerante 100GB', 'Residencial']).optional(),
     amount: amountSchema.optional(),
     kitNumber: z.string().trim().min(1).optional(),
     passwordSub: z.string().trim().min(1).optional(),

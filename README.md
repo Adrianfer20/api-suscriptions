@@ -26,14 +26,35 @@ Esta API permite:
 3.  Configurar variables de entorno en `.env` (puerto, credenciales de Firebase, Twilio, etc.).
 4.  Colocar las credenciales de servicio de Firebase en `config/firebase.json` (o configurar via variables de entorno).
 
+Comandos rápidos:
+
+```bash
+# Instalar dependencias
+npm install
+
+# Ejecutar en modo desarrollo
+npm run dev
+
+# Compilar
+npm run build
+
+# Ejecutar tests
+npm test
+```
+
 ## 4. Autenticación y Seguridad
 
 La mayoría de los endpoints están protegidos y requieren un token de Firebase Authentication.
 - **Header:** `Authorization: Bearer <ID_TOKEN>`
 - **Roles:** El sistema maneja roles en los Custom Claims del usuario (`admin`, `staff`, `client`).
+- **Header:** `Authorization: Bearer <ID_TOKEN>`
+- **Roles:** El sistema maneja roles en los Custom Claims del usuario. Actualmente el proyecto mantiene solo dos roles: `admin` y `client`.
     - `admin`: Acceso total.
-    - `staff`: Acceso limitado (principalmente comunicaciones).
-    - `client`: Acceso restringido a sus propios datos (actualmente limitado).
+    - `client`: Acceso restringido a sus propios datos.
+  
+  Nota: se ha eliminado el rol `staff` para simplificar la estructura de permisos.
+
+  Soporte de emails: el sistema acepta y preserva subdirecciones en Gmail (ej. `user+local@gmail.com`). La normalización de correo está configurada para no eliminar el `+local`.
 
 ## 5. Referencia de API
 
@@ -52,7 +73,7 @@ La mayoría de los endpoints están protegidos y requieren un token de Firebase 
 
 ### Autenticación (`/auth`)
 - **`POST /auth/create`** (Admin)
-  - **Body:** `{ "email": "user@mail.com", "password": "pass", "role": "admin|staff|client", "displayName": "Name" }`
+  - **Body:** `{ "email": "user@mail.com", "password": "pass", "role": "admin|client", "displayName": "Name" }`
   - **Respuesta:** `{ "ok": true, "uid": "...", "role": "..." }`
 - **`GET /auth/me`** (Auth required)
   - **Uso:** Obtener información del usuario actual.
@@ -109,6 +130,7 @@ Gestionado por administradores.
 
 ### Comunicaciones (`/communications`)
 - **`GET /communications/conversations`** (Admin/Staff)
+ - **`GET /communications/conversations`** (Admin only)
   - **Uso:** Obtener lista de conversaciones (mezcla de Clientes y Desconocidos).
   - **Identificadores:** Utiliza el campo `phone` como ID único.
   - **Respuesta:** Objeto `Conversation` (ver Modelos).
@@ -122,14 +144,14 @@ Gestionado por administradores.
   - **Body:** `{ "clientId": "...", "template": "nombre_plantilla", "templateData": { ... } }`
   - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para enviar a prospectos.
   - **Uso:** Enviar plantillas WhatsApp a Clientes o Prospectos.
-- **`POST /communications/send`** (Admin/Staff)
+- **`POST /communications/send`** (Admin only)
   - **Body:** `{ "clientId": "...", "body": "Texto libre..." }`
   - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para chatear con prospectos.
   - **Uso:** Responder con texto libre (requiere sesión abierta 24h).
 - **`POST /communications/subscriptions/link`** (Admin)
   - **Body:** `{ "phone": "+521234567890", "subscriptionIds": ["sub1", "sub2"] }`
   - **Uso:** Vincular múltiples suscripciones a una conversación (para clientes con varias antenas).
-- **`GET /communications/subscriptions/:phone`** (Admin/Staff)
+- **`GET /communications/subscriptions/:phone`** (Admin only)
   - **Param :phone:** Número de teléfono en formato E.164.
   - **Uso:** Obtener lista de suscripciones vinculadas a un teléfono.
 - **`POST /communications/webhook`**

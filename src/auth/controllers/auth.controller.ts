@@ -42,9 +42,9 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     const { email, password, displayName, role, disabled } = req.body;
     
     // Basic validation
-    if (role && !['admin', 'staff', 'client', 'guest'].includes(role)) {
+     if (role && !['admin', 'client'].includes(role)) {
        return res.status(400).json({ ok: false, message: 'Invalid role' });
-    }
+     }
 
     const updatedUser = await authService.updateUser(uid, { email, password, displayName, role, disabled });
     return res.json({ ok: true, data: updatedUser });

@@ -24,7 +24,7 @@ describe('Communications Routes', () => {
       const authMock = {
         verifyIdToken: async (token: string) => {
           if (token === 'token-admin') return { uid: 'u1', role: 'admin', email: 'admin@test.com' };
-          if (token === 'token-staff') return { uid: 'u2', role: 'staff', email: 'staff@test.com' };
+          if (token === 'token-staff') return { uid: 'u2', role: 'admin', email: 'staff@test.com' };
           throw new Error('Invalid token');
         }
       };
@@ -88,7 +88,7 @@ describe('Communications Routes', () => {
   });
 
   describe('POST /communications/send', () => {
-    it('should send text if staff', async function() {
+    it('should send text if staff (treated as admin)', async function() {
       if (!authStub) return this.skip();
       const res = await request(app)
         .post('/communications/send')

@@ -18,7 +18,7 @@ router.post('/webhook-status', (req: Request, res: Response) => communicationsCo
 router.get(
   '/conversations',
   authenticate,
-  requireRole('admin', 'staff'),
+  requireRole('admin'),
   validateRequest,
   (req: Request, res: Response) => communicationsController.getConversations(req, res)
 );
@@ -40,7 +40,7 @@ router.post(
 router.post(
   '/send',
   authenticate,
-  requireRole('admin', 'staff'),
+  requireRole('admin'),
   [
       body('clientId').isString().notEmpty(),
       body('body').isString().notEmpty()
@@ -53,7 +53,7 @@ router.post(
 router.get(
   '/messages/:clientId',
   authenticate,
-  requireRole('admin', 'staff'),
+  requireRole('admin'),
   [param('clientId').isString().notEmpty()],
   validateRequest,
   (req: Request, res: Response) => communicationsController.getMessages(req, res)
@@ -63,7 +63,7 @@ router.get(
 router.post(
   '/conversations/:clientId/read',
   authenticate,
-  requireRole('admin', 'staff'),
+  requireRole('admin'),
   [param('clientId').isString().notEmpty()],
   validateRequest,
   (req: Request, res: Response) => communicationsController.markAsRead(req, res)
@@ -86,7 +86,7 @@ router.post(
 router.get(
   '/subscriptions/:phone',
   authenticate,
-  requireRole('admin', 'staff'),
+  requireRole('admin'),
   [param('phone').isString().notEmpty()],
   validateRequest,
   (req: Request, res: Response) => communicationsController.getSubscriptions(req, res)
