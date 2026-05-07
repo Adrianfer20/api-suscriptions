@@ -15,11 +15,16 @@ class SubscriptionService {
     return firebaseAdmin.firestore().collection('clients');
   }
 
+  private adminsCollection() {
+    if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+    return firebaseAdmin.firestore().collection('admins');
+  }
+
   async create(data: Pick<Subscription, 'clientId' | 'startDate' | 'cutDate' | 'plan' | 'amount' | 'passwordSub' | 'kitNumber'>) {
-    // validate client exists (by doc id or uid)
     let clientDoc = await this.clientsCollection().doc(data.clientId).get();
     let clientExists = clientDoc.exists;
     let clientPhone = '';
+    let userType: 'client' | 'admin' = 'client';
     
     if (!clientExists) {
       const q = await this.clientsCollection().where('uid', '==', data.clientId).limit(1).get();
@@ -28,12 +33,30 @@ class SubscriptionService {
         clientExists = true;
       }
     }
+
+    if (!clientExists) {
+      let adminDoc = await this.adminsCollection().doc(data.clientId).get();
+      let adminExists = adminDoc.exists;
+      
+      if (!adminExists) {
+        const qAdmin = await this.adminsCollection().where('uid', '==', data.clientId).limit(1).get();
+        if (!qAdmin.empty) {
+          adminDoc = qAdmin.docs[0];
+          adminExists = true;
+        }
+      }
+
+      if (adminExists) {
+        clientDoc = adminDoc;
+        clientExists = true;
+        userType = 'admin';
+      }
+    }
     
-    if (!clientExists) throw new Error('Client not found');
+    if (!clientExists) throw new Error('Client or Admin not found');
     
-    // Get client's phone for linking to conversation
-    const clientData = clientDoc.data();
-    clientPhone = clientData?.phone || '';
+    const userData = clientDoc.data();
+    clientPhone = userData?.phone || '';
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
@@ -55,6 +78,16 @@ class SubscriptionService {
     });
     const snap = await docRef.get();
     const newSubscription = { id: docRef.id, ...(snap.data() as any) } as Subscription;
+    
+    if (userType === 'admin') {
+      try {
+        await this.adminsCollection().doc(clientDoc.id).update({
+          subscriptionIds: firebaseAdmin.firestore.FieldValue.arrayUnion(docRef.id)
+        });
+      } catch (err) {
+        console.warn('Failed to add subscriptionId to admin subscriptionIds:', err);
+      }
+    }
     
     // Link subscription to conversation if client has phone
     if (clientPhone && communicationsService) {
@@ -132,6 +165,26 @@ class SubscriptionService {
       if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
       const snap = await this.collection().where('clientId', '==', clientId).get();
       if (snap.empty) return;
+
+      const subIdsToDelete = snap.docs.map(doc => doc.id);
+
+      let adminDoc = await this.adminsCollection().doc(clientId).get();
+      if (!adminDoc.exists) {
+        const qAdmin = await this.adminsCollection().where('uid', '==', clientId).limit(1).get();
+        if (!qAdmin.empty) {
+          adminDoc = qAdmin.docs[0];
+        }
+      }
+
+      if (adminDoc.exists) {
+        try {
+          await this.adminsCollection().doc(adminDoc.id).update({
+            subscriptionIds: firebaseAdmin.firestore.FieldValue.arrayRemove(...subIdsToDelete)
+          });
+        } catch (err) {
+          console.warn('Failed to remove subscriptionIds from admin:', err);
+        }
+      }
 
       const batch = firebaseAdmin.firestore().batch();
       snap.docs.forEach(doc => {

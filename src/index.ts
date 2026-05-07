@@ -9,6 +9,7 @@ import twilioClient from './config/twilio';
 import { randomUUID } from 'crypto';
 import authRoutes from './auth/routes/auth.routes';
 import clientsRoutes from './clients/routes/client.routes';
+import adminsRoutes from './admins/routes/admin.routes';
 import subscriptionsRoutes from './subscriptions/routes/subscription.routes';
 import communicationsRoutes from './communications/routes/communications.routes';
 import notificationRoutes from './notifications/routes/notification.routes';
@@ -97,6 +98,9 @@ app.use('/auth', authRoutes);
 
 // Mount clients module
 app.use('/clients', clientsRoutes);
+
+// Mount admins module
+app.use('/admins', adminsRoutes);
 
 // Mount subscriptions module
 app.use('/subscriptions', subscriptionsRoutes);

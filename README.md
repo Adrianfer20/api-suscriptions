@@ -94,21 +94,37 @@ Gestionado por administradores.
 - **`PATCH /clients/:id`**
   - **Body:** Campos a actualizar (`name`, `phone`, `address`).
 
+### Administradores (`/admins`)
+Gestionado por administradores. Permite crear perfiles de admin en Firestore para que puedan tener suscripciones.
+- **`POST /admins`**
+  - **Body:** `{ "uid": "firebase-uid", "name": "Nombre", "phone": "+52...", "address": "...", "email": "admin@email.com", "notes": "..." }`
+  - **Respuesta:** `{ "ok": true, "data": { ...admin } }`
+- **`GET /admins`**
+  - **Query:** `limit` (número), `startAfter` (cursor para paginación).
+  - **Respuesta:** Lista de administradores registrados.
+- **`GET /admins/:id`**
+  - **Uso:** Obtener detalle de un administrador.
+- **`PATCH /admins/:id`**
+  - **Body:** Campos a actualizar (`name`, `phone`, `address`, `email`, `notes`, `active`).
+- **`DELETE /admins/:id`**
+  - **Uso:** Eliminar perfil de admin en Firestore (no elimina el usuario de Firebase Auth).
+
 ### Suscripciones (`/subscriptions`)
 Gestionado por administradores.
 - **`POST /subscriptions`**
   - **Body:** 
     ```json
     {
-      "clientId": "client-id",
+      "clientId": "client-id-or-admin-id",
       "startDate": "YYYY-MM-DD",
       "cutDate": "YYYY-MM-DD",
       "plan": "Plan Name",
       "amount": "$100.00",
-      "kitNumber": "KIT4M01422983C2H", // opcional; si no se proporciona será "Valor No Disponible"
+      "kitNumber": "KIT4M01422983C2H",
       "country": "VES"
     }
     ```
+  - **Nota:** El campo `clientId` acepta tanto un ID de cliente como un ID de admin. El sistema busca primero en la colección `clients` y si no encuentra, busca en la colección `admins`.
 - **`GET /subscriptions`**
   - **Query:** `limit`, `startAfter`.
 - **`GET /subscriptions/:id`**
@@ -213,6 +229,10 @@ Las conversaciones soportan múltiples suscripciones por teléfono (ej. cliente 
 
 ### Client
 - **Phone:** Formato E.164 (ej. `+521234567890`).
+
+### Admin
+- **Phone:** Formato E.164 (ej. `+521234567890`).
+- **subscriptionIds:** Array de IDs de suscripciones asociadas al admin.
 
 ### Message (WhatsApp)
 - **Estados:** `queued` → `sent` → `delivered` → `read` (o `failed`)
