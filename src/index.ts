@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { PORT } from './config/index';
+import { PORT, HAS_FIREBASE_ADMIN } from './config/index';
 import firebaseApp from './config/firebase';
 import firebaseAdmin from './config/firebaseAdmin';
 import twilioClient from './config/twilio';
@@ -122,8 +122,12 @@ import errorHandler from './middlewares/errorHandler';
 // Central error handler
 app.use(errorHandler);
 
-// Inicializar el trabajo de automatización diario (si no está en el entorno de prueba)
-if (process.env.NODE_ENV !== 'test') startDailyAutomationJob();
+// Inicializar el trabajo de automatización diario solo si Firebase Admin está configurado y no es entorno de prueba
+if (process.env.NODE_ENV !== 'test' && HAS_FIREBASE_ADMIN) {
+  startDailyAutomationJob();
+} else if (process.env.NODE_ENV !== 'test') {
+  console.info('[automation] Firebase Admin no configurado; omitiendo inicio del trabajo diario.');
+}
 
 if (require.main === module) {
   app.listen(port, () => {

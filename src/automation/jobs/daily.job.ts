@@ -1,4 +1,5 @@
 import cron, { ScheduledTask } from 'node-cron';
+import firebaseAdmin from '../../config/firebaseAdmin';
 import automationService from '../services/automation.service';
 
 type JobState = {
@@ -27,6 +28,11 @@ export async function startDailyAutomationJob() {
   if (process.env.AUTOMATION_JOB_DISABLED === 'true') {
      console.info('[automation] Daily job disabled via AUTOMATION_JOB_DISABLED flag');
      return;
+  }
+
+  if (!firebaseAdmin) {
+    console.info('[automation] Firebase Admin no inicializado; omitiendo inicio del trabajo diario.');
+    return;
   }
 
   try {

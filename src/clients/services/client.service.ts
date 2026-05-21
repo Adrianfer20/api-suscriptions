@@ -1,6 +1,7 @@
 import firebaseAdmin from '../../config/firebaseAdmin';
 import type { firestore } from 'firebase-admin';
 import { Client } from '../models/client.model';
+import { normalizePhone } from '../../utils/phone.util';
 
 class ClientService {
   private collection() {
@@ -49,10 +50,11 @@ class ClientService {
             
             // Also update any existing conversation
             try {
-                await this.conversationsCollection().doc(data.phone).set({
+                const conversationDocId = normalizePhone(data.phone) || data.phone;
+            await this.conversationsCollection().doc(conversationDocId).set({
                     clientId: existingDoc.id,
                     name: data.name,
-                    phone: data.phone,
+                    phone: conversationDocId,
                     prospect: false,
                     updatedAt: now
                 }, { merge: true });
@@ -80,10 +82,11 @@ class ClientService {
     if (data.phone) {
       try {
         // Actualizar conversación existente (si hay)
-        await this.conversationsCollection().doc(data.phone).set({
+        const conversationDocId = normalizePhone(data.phone) || data.phone;
+        await this.conversationsCollection().doc(conversationDocId).set({
           clientId: docRef.id,
           name: data.name,
-          phone: data.phone,
+          phone: conversationDocId,
           prospect: false
         }, { merge: true });
 
@@ -198,7 +201,8 @@ class ClientService {
     // Actualizar conversación a prospecto si existe
     for (const phone of phones) {
       try {
-        await this.conversationsCollection().doc(phone).set({
+        const conversationDocId = normalizePhone(phone) || phone;
+        await this.conversationsCollection().doc(conversationDocId).set({
           clientId: firebaseAdmin.firestore.FieldValue.delete(),
           prospect: true,
           name: 'Desconocido',

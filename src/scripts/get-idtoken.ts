@@ -1,9 +1,10 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import path from 'path';
-import firebaseAdmin from '../config/firebaseAdmin';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+
+const firebaseAdmin = require('../config/firebaseAdmin').default;
 
 // Usage example:
 // npx ts-node src/scripts/get-idtoken.ts --email "adrian@email.com" --password "12345678"

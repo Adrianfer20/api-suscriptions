@@ -7,6 +7,7 @@ import templates, { getMissingTemplateVariables, renderContentVariables } from '
 import { Message } from '../models/message.model';
 import type { Subscription } from '../../subscriptions/models/subscription.model';
 import notificationService from '../../notifications/notification.service';
+import { normalizePhone } from '../../utils/phone.util';
 
 class CommunicationsService {
     // Helpers para colecciones Firestore
@@ -118,23 +119,17 @@ class CommunicationsService {
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
+    const normalizedPhone = normalizePhone(toPhone);
 
-    // Update conversation metadata (siempre, para mantener el historial y nombre actualizado)
-    // Preserve existing subscriptionIds if already present
-    const existingConv = await this.conversationsCollection().doc(toPhone).get();
-    const existingData = existingConv.exists ? existingConv.data() : {};
-    
-    await this.conversationsCollection().doc(toPhone).set({
+    await this.conversationsCollection().doc(normalizedPhone).set({
         clientId: resolvedClientId !== 'unknown' ? resolvedClientId : undefined,
-        name: clientName || `Desconocido ${toPhone}`,
-        phone: toPhone,
+        name: clientName || `Desconocido ${normalizedPhone}`,
+        phone: normalizedPhone,
         lastMessageAt: now,
         lastMessageBody: `Template: ${templateName}`,
         lastMessageDir: 'outbound',
         prospect: resolvedClientId === 'unknown',
-        unreadCount: 0,
-        // Preserve existing subscriptionIds, initialize if new conversation
-        subscriptionIds: existingData?.subscriptionIds || []
+        unreadCount: 0
     }, { merge: true });
 
     try {
@@ -225,11 +220,12 @@ class CommunicationsService {
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
+    const normalizedPhone = normalizePhone(toPhone);
 
     // Construir metadata de conversación sin undefined
     const conversationData: any = {
       name: clientName,
-      phone: toPhone,
+      phone: normalizedPhone,
       lastMessageAt: now,
       lastMessageBody: body,
       lastMessageDir: 'outbound',
@@ -239,7 +235,7 @@ class CommunicationsService {
     if (typeof resolvedClientId === 'string' && resolvedClientId !== 'unknown') {
       conversationData.clientId = resolvedClientId;
     }
-    await this.conversationsCollection().doc(toPhone).set(conversationData, { merge: true });
+    await this.conversationsCollection().doc(normalizedPhone).set(conversationData, { merge: true });
 
     try {
       if (process.env.TEST_DRY_RUN === 'true') {
@@ -433,6 +429,7 @@ class CommunicationsService {
     
     const fromPhone = (From || '').replace('whatsapp:', '');
     if (!fromPhone) throw new Error('Invalid sender');
+    const normalizedFromPhone = normalizePhone(fromPhone);
 
     let clientName = ProfileName || 'Unknown';
     let clientId = 'unknown';
@@ -466,10 +463,10 @@ class CommunicationsService {
     
     // Update or Create Conversation Document
     // ID is the phone number
-    const conversationRef = this.conversationsCollection().doc(fromPhone);
+    const conversationRef = this.conversationsCollection().doc(normalizedFromPhone);
     
     const conversationData: any = {
-        phone: fromPhone,
+        phone: normalizedFromPhone,
         lastMessageAt: now,
         lastMessageBody: Body || '(Media/No text)',
         lastMessageDir: 'inbound',
@@ -549,9 +546,11 @@ class CommunicationsService {
     
     let docId = clientIdOrPhone;
     let phone = clientIdOrPhone;
+    const potentialPhone = normalizePhone(clientIdOrPhone);
+    const phoneDocId = /^\+?[0-9]{7,15}$/.test(potentialPhone) ? potentialPhone : clientIdOrPhone;
     
     // 1. Try to fetch conversation by Phone (if param is phone)
-    let convDoc = await this.conversationsCollection().doc(clientIdOrPhone).get();
+    let convDoc = await this.conversationsCollection().doc(phoneDocId).get();
     
     if (!convDoc.exists) {
         // 2. Try to fetch by clientId
@@ -566,7 +565,7 @@ class CommunicationsService {
              if (clientDoc.exists) {
                  const clientData = clientDoc.data();
                  if (clientData && clientData.phone) {
-                     phone = clientData.phone;
+                     phone = normalizePhone(clientData.phone) || clientData.phone;
                      convDoc = await this.conversationsCollection().doc(phone).get();
                  }
              }
@@ -583,7 +582,8 @@ class CommunicationsService {
     }
 
     // 1. Reset conversation unread count
-    await this.conversationsCollection().doc(phone).update({ unreadCount: 0 });
+    const updatePhone = /^\+?[0-9]{7,15}$/.test(normalizePhone(phone)) ? normalizePhone(phone) : phone;
+    await this.conversationsCollection().doc(updatePhone).update({ unreadCount: 0 });
 
     // 2. Mark specific messages as read (limit 500 per batch)
     // Query inbound 'received' messages for this phone (using 'from') or clientId?
@@ -622,32 +622,23 @@ class CommunicationsService {
   async linkSubscriptionsToConversation(phone: string, subscriptionIds: string[]) {
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     
-    const normalizedPhone = phone.replace(/[\s()-]/g, '');
+    const normalizedPhone = normalizePhone(phone);
     if (!/^\+?[0-9]{7,15}$/.test(normalizedPhone)) {
       throw new Error('Invalid phone number format');
     }
 
     const convRef = this.conversationsCollection().doc(normalizedPhone);
-    const convDoc = await convRef.get();
-    
-    let existingSubscriptionIds: string[] = [];
-    if (convDoc.exists) {
-      const data = convDoc.data();
-      existingSubscriptionIds = data?.subscriptionIds || [];
-    }
-
-    // Agregar las nuevas suscripciones, evitando duplicados
-    const newSubscriptionIds = [...new Set([...existingSubscriptionIds, ...subscriptionIds])];
+    console.log('[Conversations] linkSubscriptionsToConversation', normalizedPhone, subscriptionIds.length, 'ids');
     
     await convRef.set({
-      subscriptionIds: newSubscriptionIds,
+      subscriptionIds: firebaseAdmin.firestore.FieldValue.arrayUnion(...subscriptionIds),
       updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
     return { 
       ok: true, 
       phone: normalizedPhone, 
-      subscriptionIds: newSubscriptionIds 
+      subscriptionIds 
     };
   }
 
@@ -740,7 +731,8 @@ class CommunicationsService {
     
     // Si el mensaje fue leído, actualizar también la conversación
     if (newStatus === 'read' && currentData.to) {
-      const convRef = this.conversationsCollection().doc(currentData.to);
+      const normalizedToPhone = normalizePhone(currentData.to);
+      const convRef = this.conversationsCollection().doc(normalizedToPhone);
       const convDoc = await convRef.get();
       if (convDoc.exists) {
         await convRef.update({
