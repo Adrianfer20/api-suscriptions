@@ -4,6 +4,9 @@ import { PaymentModel } from '../models/payment.model';
 import { CreatePaymentInput, PaymentFiltersInput } from '../validators/payment.schema';
 import { PaymentStatus, PAYMENT_METHOD_REQUIREMENTS } from '../types';
 import { addMonthsTZ, startOfDayTZ } from '../../subscriptions/utils/date.util';
+import eventBus from '../../events/eventBus';
+import { EVENT_PAYMENT_VERIFIED } from '../../events/domainEvents';
+import billingPeriodService from '../../billingPeriods/services/billingPeriod.service';
 
 const DEFAULT_TIMEZONE = process.env.AUTOMATION_TZ || 'America/Caracas';
 
@@ -120,53 +123,7 @@ class PaymentService {
    * Valida que el monto del pago no exceda la deuda pendiente de la suscripción
    * Esta validación es simple: suma todos los pagos existentes y verifica que no exceda el monthly amount
    */
-  private async validateMonthlyLimit(subscriptionId: string, newAmount: number): Promise<void> {
-    // Obtener la suscripción
-    const subscriptionDoc = await this.subscriptionsCollection().doc(subscriptionId).get();
-    if (!subscriptionDoc.exists) {
-      throw new Error('Suscripción no encontrada');
-    }
-    
-    const subscription = subscriptionDoc.data();
-    if (!subscription) {
-      throw new Error('Suscripción no encontrada');
-    }
-    
-    // Parsear el monto de la suscripción (remover $ y convertir a número)
-const monthlyAmount = typeof subscription.amount === 'number'
-        ? subscription.amount
-        : parseFloat(String(subscription.amount).replace(/[^0-9.-]/g, '') || '0');
-    
-    if (monthlyAmount <= 0) {
-      return; // Si no tiene monto definido, no validar
-    }
-    
-    // Obtener todos los pagos existentes (solo pending y verified)
-    const snaps = await this.collection()
-      .where('subscriptionId', '==', subscriptionId)
-      .get();
-    
-    let existingTotal = 0;
-    snaps.docs.forEach((doc) => {
-      const data = doc.data();
-      // Solo contar pagos pending o verified
-      if (data.status === 'pending' || data.status === 'verified') {
-        existingTotal += data.amount || 0;
-      }
-    });
-    
-    // Calcular el nuevo total
-    const newTotal = existingTotal + newAmount;
-    
-    // Validar que no exceda el monthly amount
-    if (newTotal > monthlyAmount) {
-      throw new Error(
-        `El monto excede el límite mensual. Costo mensual: ${monthlyAmount}. ` +
-        `Ya registrado: ${existingTotal}. ` +
-        `Monto máximo permitido: ${monthlyAmount - existingTotal}`
-      );
-    }
-  }
+  // Monthly limit validation moved to billingPeriodService
 
   /**
    * Filtra campos undefined/null para evitar errores de Firestore
@@ -191,9 +148,9 @@ const monthlyAmount = typeof subscription.amount === 'number'
       throw new Error('Suscripción no encontrada');
     }
 
-    // Validar que el monto no exceda el límite mensual
+    // Validar que el monto no exceda el límite mensual (delegado a billingPeriodService)
     if (!data.free) {
-      await this.validateMonthlyLimit(data.subscriptionId, data.amount);
+      await billingPeriodService.validateMonthlyLimit(data.subscriptionId, data.amount);
     }
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
@@ -243,8 +200,13 @@ const monthlyAmount = typeof subscription.amount === 'number'
 
     const docRef = await this.collection().add(paymentData);
     const snap = await docRef.get();
-    
-    return { id: docRef.id, ...(snap.data() as Omit<PaymentModel, 'id'>) } as PaymentModel;
+    const createdPayment = { id: docRef.id, ...(snap.data() as Omit<PaymentModel, 'id'>) } as PaymentModel;
+
+    if (autoVerify) {
+      eventBus.emit(EVENT_PAYMENT_VERIFIED, { payment: createdPayment });
+    }
+
+    return createdPayment;
   }
 
   /**
@@ -365,81 +327,15 @@ const monthlyAmount = typeof subscription.amount === 'number'
       throw new Error('Pago no encontrado');
     }
 
-    // Obtener la suscripción para validar y actualizar
-    const subscriptionDoc = await this.subscriptionsCollection().doc(payment.subscriptionId).get();
-    if (subscriptionDoc.exists) {
-      const subscription = subscriptionDoc.data();
-      const monthlyAmount = parseFloat(subscription?.amount?.replace(/[^0-9.-]/g, '') || '0');
-
-      if (monthlyAmount > 0) {
-        // Obtener todos los pagos existentes (verificados + pendientes) EXCEPTO el que se está verificando
-        const snaps = await this.collection()
-          .where('subscriptionId', '==', payment.subscriptionId)
-          .get();
-        
-        let existingTotal = 0;
-        snaps.docs.forEach((doc) => {
-          const data = doc.data();
-          // Excluir el pago actual de la suma
-          if (doc.id !== id && (data.status === 'pending' || data.status === 'verified')) {
-            existingTotal += data.amount || 0;
-          }
-        });
-        
-        // Validar que la suma total no exceda el monthly amount
-        const newTotal = existingTotal + payment.amount;
-        if (newTotal > monthlyAmount) {
-          throw new Error(
-            `No se puede verificar. El monto excede el límite mensual. Costo mensual: ${monthlyAmount}. ` +
-            `Otros pagos: ${existingTotal}. Este pago: ${payment.amount}. Total: ${newTotal}`
-          );
-        }
-      }
-
-      // Actualizar suscripción: siempre a active, y cutDate si el pago cubre el mes completo
-      const updateSubscriptionData: Record<string, unknown> = {
-        status: 'active',
-      };
-
-      const monthlyAmountValue = parseFloat(subscription?.amount?.replace(/[^0-9.-]/g, '') || '0');
-      const currentCutDate = subscription?.cutDate || subscription?.nextCutDate || '';
-      
-      // Obtener pagos verificados del PERÍODO ACTUAL (desde último cutDate)
-      const currentPeriodTotal = await this.getVerifiedPaymentsInCurrentPeriod(payment.subscriptionId, currentCutDate);
-      
-      // Incluir el pago que se está verificando
-      const currentPeriodTotalWithCurrent = currentPeriodTotal + payment.amount;
-      
-      console.log('[PaymentService] Verificando cutDate:', { 
-        currentPeriodTotal, 
-        paymentAmount: payment.amount, 
-        total: currentPeriodTotalWithCurrent, 
-        monthlyAmountValue,
-        currentCutDate
-      });
-      
-      // Solo avanzar cutDate si el período actual está completamente pagado
-      if (monthlyAmountValue > 0 && currentPeriodTotalWithCurrent >= monthlyAmountValue) {
-        console.log('[PaymentService] Actualizando cutDate - Pago completo del período');
-        
-        // Usar addMonthsTZ para calcular el próximo cutDate correctamente
-        // Avanzamos 1 mes desde el cutDate actual
-        const newCutDate = addMonthsTZ(currentCutDate, 1, DEFAULT_TIMEZONE);
-        
-        updateSubscriptionData.cutDate = newCutDate;
-        console.log('[PaymentService] Nuevo cutDate:', newCutDate);
-      } else {
-        console.log('[PaymentService] NO actualiza cutDate: período no completo', { 
-          currentPeriodTotal: currentPeriodTotal + payment.amount, 
-          monthlyAmount: monthlyAmountValue 
-        });
-      }
-
-      console.log('[PaymentService] updateSubscriptionData:', updateSubscriptionData);
-      await this.subscriptionsCollection().doc(payment.subscriptionId).update(updateSubscriptionData);
+    if (payment.subscriptionId) {
+      await billingPeriodService.validateMonthlyLimit(payment.subscriptionId, payment.amount, id);
     }
 
-    return this.updateStatus(id, 'verified', userId, notes);
+    const updatedPayment = await this.updateStatus(id, 'verified', userId, notes);
+
+    eventBus.emit(EVENT_PAYMENT_VERIFIED, { payment: updatedPayment });
+
+    return updatedPayment;
   }
 
   /**

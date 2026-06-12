@@ -159,3 +159,57 @@ npm test
   - acceso de cliente vs admin.
 - Asegurar que los clientes solo puedan ver sus propias suscripciones y períodos relacionados.
 - Mantener el endpoint `renew` como compatibilidad solo hasta migrar completamente al flujo de `billingPeriods`.
+
+---
+
+## Uso y documentación operativa (resumen técnico)
+
+La versión actual implementa una arquitectura interna basada en eventos con tres capas claramente separadas:
+
+- **Estado (decision-maker):** `billingPeriodService` — aplica transiciones de estado para `billingPeriods` y actualiza `subscriptions` en consecuencia.
+- **Reglas:** funciones/servicios puros que calculan `evaluateBillingPeriod(period) -> actions[]`.
+- **Flujo:** `eventBus` (Node `EventEmitter`) y `automation` para programar evaluaciones; los listeners deben ser delgados y delegar a servicios.
+
+### Quickstart de uso
+
+1. Instalar dependencias: `npm ci`
+2. Compilar: `npm run build`
+3. Ejecutar tests: `npm test`
+4. Levantar servidor en desarrollo: `npm run dev`
+
+### Variables de entorno importantes
+- `NODE_ENV` — entorno (usa `test` para evitar que se inicie cron en CI).
+- `HAS_FIREBASE_ADMIN` — si `true` se inicializa Firebase Admin (cron depende de esto).
+- `AUTOMATION_JOB_DISABLED` — si `true` deshabilita el job programado.
+- Credenciales de Firebase y Twilio según `config/secrets.example.json`.
+
+### Contratos de eventos (resumen)
+
+- `EVENT_PAYMENT_VERIFIED` — { payment }
+- `EVENT_BILLING_PERIOD_EVALUATION_REQUEST` — { period }
+- `EVENT_BILLING_PERIOD_PAID` — { period }
+- `EVENT_BILLING_PERIOD_OVERDUE` — { period }
+- `EVENT_SUBSCRIPTION_SUSPENDED` — { period }
+
+Nota: los listeners registrados en `src/events/registerEventListeners.ts` son delgados y delegan en `communicationsService`.
+
+### Cron y ciclo de vida
+
+El job diario (node-cron) se configura en `src/automation/jobs/daily.job.ts` y se inicia desde `src/index.ts` solo si `HAS_FIREBASE_ADMIN` y `NODE_ENV !== 'test'`.
+
+Recomendación operativa: añadir un manejador de `SIGTERM`/`SIGINT` en `src/index.ts` que llame a `stopDailyAutomationJob()` y cierre conexiones (Firestore, Twilio) para un shutdown ordenado en producción.
+
+### Observabilidad y riesgos operativos
+
+- Monitorizar número de listeners y emisiones por evento; establecer `eventBus.setMaxListeners(n)` si la carga crece.
+- Evitar lógica de decisión fuera de `billingPeriodService`.
+
+### Cómo aportar un nuevo listener correctamente
+
+1. Implementa la función en el servicio responsable (ej. `communicationsService.notifyX`).
+2. Registra un listener delgado en `src/events/registerEventListeners.ts` que invoque ese método y capture errores.
+3. No re-emitas eventos de decisión desde listeners; si necesitas encadenar, emite sólo eventos de notificación.
+
+---
+
+Para detalles arquitectónicos y decisiones ver `docs/adr/0001-fase3-event-driven.md`.

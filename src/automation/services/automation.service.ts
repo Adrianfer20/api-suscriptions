@@ -1,5 +1,8 @@
 import firebaseAdmin from '../../config/firebaseAdmin';
 import communicationsService from '../../communications/services/communications.service';
+import billingPeriodService from '../../billingPeriods/services/billingPeriod.service';
+import eventBus from '../../events/eventBus';
+import { EVENT_BILLING_PERIOD_EVALUATION_REQUEST } from '../../events/domainEvents';
 import { Subscription } from '../../subscriptions/models/subscription.model';
 import { getTodayInfo } from '../rules/subscription.rules';
 import { addDaysTZ, addMonthsTZ } from '../../subscriptions/utils/date.util';
@@ -119,21 +122,10 @@ class AutomationService {
       actionDetails: []
     };
 
-    // 1. Process Reminders (3 days BEFORE cut)
-    // Formula: cutDate == today + 3
     const reminderDate = addDaysTZ(todayIso, 3, timeZone);
     await this.processReminders(reminderDate, dryRun, result);
-
-    // 2. Process Cutoff Day (Day 0)
-    // Formula: cutDate == today. Active subscriptions.
-    // Action: Notify Cutoff (no immediate status change; month-based rules handle overdue state transitions).
     await this.processCutoffDay(todayIso, dryRun, result);
-
-    // 4. Overdue rules: 1 month overdue -> about_to_expire, 2 months overdue -> suspended
-    await this.processMonth1Overdue(addMonthsTZ(todayIso, -1), dryRun, result);
-    await this.processMonth2Overdue(addMonthsTZ(todayIso, -2), dryRun, result);
-
-    // 5. Reminder for about_to_expire subscriptions (3 days before 2nd month deadline)
+    await this.processBillingPeriodTransitions(todayIso, dryRun, result);
     await this.processAboutToExpireReminder(addMonthsTZ(todayIso, -1), dryRun, result);
 
     await this.writeRunLog(result, startedAt, options);
@@ -141,31 +133,35 @@ class AutomationService {
   }
 
   // --- Step 1: Reminder (-3 Days) ---
-  private async processReminders(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
-    const snapshot = await this.subscriptionsCollection()
-      .where('status', '==', 'active')
-      .where('cutDate', '==', targetCutDate)
+  private async processReminders(targetDueDate: string, dryRun: boolean, result: AutomationRunResult) {
+    const snapshot = await this.firestore()
+      .collection('billingPeriods')
+      .where('status', '==', 'pending')
+      .where('dueDate', '==', targetDueDate)
       .get();
 
     for (const doc of snapshot.docs) {
-      const sub = { id: doc.id, ...(doc.data() as Subscription) };
+      const period = { id: doc.id, ...(doc.data() as any) } as any;
+      const subscription = await this.getSubscription(period.subscriptionId);
+      if (!subscription) continue;
+
       result.processedCount++;
-      const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: false };
+      const detail: AutomationActionDetail = { subscriptionId: subscription.id!, actions: [], overdue: false };
 
       if (dryRun) {
         detail.actions.push('notify-reminder-3days (dry-run)');
         result.notificationsSent++;
       } else {
         try {
-          await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_reminder_3days_2v', {
-            name: 'Cliente', 
-            dueDate: sub.cutDate,
-            kitNumber: sub.kitNumber || 'N/A'
+          await communicationsService.sendTemplate(subscription.clientId || subscription.ownerId || '', 'subscription_reminder_3days_2v', {
+            name: 'Cliente',
+            dueDate: period.dueDate,
+            kitNumber: subscription.kitNumber || 'N/A'
           });
           detail.actions.push('notify-reminder-3days');
           result.notificationsSent++;
         } catch (err: any) {
-          result.errors.push({ subscriptionId: sub.id, action: 'notify-reminder-3days', message: err.message });
+          result.errors.push({ subscriptionId: subscription.id!, action: 'notify-reminder-3days', message: err.message });
         }
       }
       result.actionDetails.push(detail);
@@ -174,162 +170,105 @@ class AutomationService {
 
   // --- Step 2: Cutoff Day (Day 0) ---
   private async processCutoffDay(todayIso: string, dryRun: boolean, result: AutomationRunResult) {
-    // We look for active subscriptions that expire TODAY (or strictly before today if missed run?)
-    // Let's stick to strict TODAY for notifications to avoid spamming old ones, 
-    // but we might want to close old ones. For now: Strict today as per "3 notifications" request.
-    const snapshot = await this.subscriptionsCollection()
-      .where('status', '==', 'active')
-      .where('cutDate', '==', todayIso)
+    const snapshot = await this.firestore()
+      .collection('billingPeriods')
+      .where('status', '==', 'pending')
+      .where('dueDate', '==', todayIso)
       .get();
 
     for (const doc of snapshot.docs) {
-      const sub = { id: doc.id, ...(doc.data() as Subscription) };
-      result.processedCount++;
-      const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
+      const period = { id: doc.id, ...(doc.data() as any) } as any;
+      const subscription = await this.getSubscription(period.subscriptionId);
+      if (!subscription) continue;
 
-      // 1. Notify "It's cutoff day"
+      result.processedCount++;
+      const detail: AutomationActionDetail = { subscriptionId: subscription.id!, actions: [], overdue: true };
+
       if (dryRun) {
         detail.actions.push('notify-cutoff-day (dry-run)');
         result.notificationsSent++;
       } else {
         try {
-          await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_cutoff_day_2v', {
+          await communicationsService.sendTemplate(subscription.clientId || subscription.ownerId || '', 'subscription_cutoff_day_2v', {
             name: 'Cliente',
-            subscriptionLabel: this.subscriptionPlan(sub),
-            cutoffDate: sub.cutDate,
-            kitNumber: sub.kitNumber || 'N/A'
+            subscriptionLabel: this.subscriptionPlan(subscription),
+            cutoffDate: subscription.nextCutDate || subscription.cutDate,
+            kitNumber: subscription.kitNumber || 'N/A'
           });
           detail.actions.push('notify-cutoff-day');
           result.notificationsSent++;
         } catch (err: any) {
-          result.errors.push({ subscriptionId: sub.id, action: 'notify-cutoff-day', message: err.message });
+          result.errors.push({ subscriptionId: subscription.id!, action: 'notify-cutoff-day', message: err.message });
         }
       }
 
-      // 2. No automatic status change at cutoff day; month-based processors will handle overdue transitions
-      // 2. No automatic status change at cutoff day; overdue rules handle month-based transitions.
       detail.actions.push('no-status-change-at-cutoff');
-
       result.actionDetails.push(detail);
     }
   }
 
-  // --- Step 3: 1 mes después del corte ---
-  private async processMonth1Overdue(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
-    // 1 month after cutDate -> mark as about_to_expire and notify
-    // Buscar suscripciones donde cutDate <= fecha de hace 1 mes (ya pasó el corte)
-    const allSubs = await this.subscriptionsCollection().get();
-    const filteredDocs = allSubs.docs.filter(doc => {
-      const data = doc.data();
-      return data.status === 'active' && data.cutDate <= targetCutDate;
-    });
+  private async processBillingPeriodTransitions(targetDate: string, dryRun: boolean, result: AutomationRunResult) {
+    const periods = await billingPeriodService.findBillingPeriodsToEvaluate(targetDate);
 
-    for (const doc of filteredDocs) {
-      const sub = { id: doc.id, ...(doc.data() as Subscription) };
+    for (const period of periods) {
       result.processedCount++;
-      const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
-
+      const detail: AutomationActionDetail = { subscriptionId: period.subscriptionId, actions: [], overdue: true };
       if (dryRun) {
-        detail.actions.push('mark-about_to_expire (dry-run)');
+        const actions = await billingPeriodService.evaluateBillingPeriod(period);
+        detail.actions.push(`evaluate-state (dry-run): ${actions.map((action) => action.type).join(', ')}`);
       } else {
         try {
-          await this.updateSubscriptionStatus(sub.id!, 'about_to_expire');
-          detail.actions.push('mark-about_to_expire');
+          eventBus.emit(EVENT_BILLING_PERIOD_EVALUATION_REQUEST, { period });
+          detail.actions.push('emit-billing-period-evaluation-request');
         } catch (err: any) {
-          result.errors.push({ subscriptionId: sub.id, action: 'mark-about_to_expire', message: err.message });
+          result.errors.push({ subscriptionId: period.subscriptionId, action: 'emit-evaluation-request', message: err.message });
         }
       }
-      result.actionDetails.push(detail);
-    }
-  }
 
-  private async processMonth2Overdue(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
-    // 2 months after cutDate -> mark as suspended and notify
-    // Buscar suscripciones donde cutDate <= fecha de hace 2 meses
-    const allSubs = await this.subscriptionsCollection().get();
-    const filteredDocs = allSubs.docs.filter(doc => {
-      const data = doc.data();
-      return data.cutDate <= targetCutDate;
-    });
-
-    for (const doc of filteredDocs) {
-      const sub = { id: doc.id, ...(doc.data() as Subscription) };
-      // skip if already suspended/cancelled/paused
-      if (sub.status === 'suspended' || sub.status === 'cancelled' || sub.status === 'paused') continue;
-      result.processedCount++;
-      const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
-
-      if (dryRun) {
-        detail.actions.push('mark-suspended (dry-run)');
-        result.notificationsSent++;
-      } else {
-        try {
-          await this.updateSubscriptionStatus(sub.id!, 'suspended');
-          detail.actions.push('mark-suspended');
-          // send suspended notice
-          try {
-            await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_suspended_notice_2v', {
-              name: 'Cliente',
-              subscriptionLabel: this.subscriptionPlan(sub),
-              kitNumber: sub.kitNumber || 'N/A'
-            });
-            detail.actions.push('notify-suspended');
-            result.notificationsSent++;
-          } catch (err: any) {
-            // collect but continue
-            result.errors.push({ subscriptionId: sub.id, action: 'notify-suspended', message: err.message });
-          }
-          result.subscriptionsCut++;
-        } catch (err: any) {
-          result.errors.push({ subscriptionId: sub.id, action: 'mark-suspended', message: err.message });
-        }
-      }
       result.actionDetails.push(detail);
     }
   }
 
   // --- Step 5: Recordatorio para suscripciones por vencer (3 días antes de suspenderse) ---
-  private async processAboutToExpireReminder(targetCutDate: string, dryRun: boolean, result: AutomationRunResult) {
-    // Buscar suscripciones con status 'about_to_expire' donde cutDate == hace 1 mes (van a suspenderse en 3 días)
-    const allSubs = await this.subscriptionsCollection().get();
-    const filteredDocs = allSubs.docs.filter(doc => {
-      const data = doc.data();
-      return data.status === 'about_to_expire' && data.cutDate <= targetCutDate;
-    });
+  private async processAboutToExpireReminder(targetDueDate: string, dryRun: boolean, result: AutomationRunResult) {
+    const snapshot = await this.firestore()
+      .collection('billingPeriods')
+      .where('status', '==', 'overdue')
+      .where('dueDate', '==', targetDueDate)
+      .get();
 
-    for (const doc of filteredDocs) {
-      const sub = { id: doc.id, ...(doc.data() as Subscription) };
+    for (const doc of snapshot.docs) {
+      const period = { id: doc.id, ...(doc.data() as any) } as any;
+      const subscription = await this.getSubscription(period.subscriptionId);
+      if (!subscription) continue;
+
       result.processedCount++;
-      const detail: AutomationActionDetail = { subscriptionId: sub.id!, actions: [], overdue: true };
+      const detail: AutomationActionDetail = { subscriptionId: subscription.id!, actions: [], overdue: true };
 
       if (dryRun) {
         detail.actions.push('notify-about_to_expire-3days (dry-run)');
         result.notificationsSent++;
       } else {
         try {
-          // Enviar recordatorio de suspensión próxima
-          await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_about_to_expire_reminder_2v', {
+          await communicationsService.sendTemplate(subscription.clientId || subscription.ownerId || '', 'subscription_about_to_expire_reminder_2v', {
             name: 'Cliente',
-            dueDate: sub.cutDate,
-            kitNumber: sub.kitNumber || 'N/A'
+            dueDate: period.dueDate,
+            kitNumber: subscription.kitNumber || 'N/A'
           });
           detail.actions.push('notify-about_to_expire-3days');
           result.notificationsSent++;
         } catch (err: any) {
-          result.errors.push({ subscriptionId: sub.id, action: 'notify-about_to_expire-3days', message: err.message });
+          result.errors.push({ subscriptionId: subscription.id!, action: 'notify-about_to_expire-3days', message: err.message });
         }
       }
       result.actionDetails.push(detail);
     }
   }
 
-  private async updateSubscriptionStatus(id: string, status: Subscription['status']) {
-    await this.subscriptionsCollection()
-      .doc(id)
-      .update({
-        status,
-        updatedAt: this.fieldValue().serverTimestamp()
-      });
+  private async getSubscription(subscriptionId: string): Promise<Subscription | null> {
+    const doc = await this.subscriptionsCollection().doc(subscriptionId).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...(doc.data() as Subscription) };
   }
 
   private async writeRunLog(result: AutomationRunResult, startedAt: number, options?: AutomationRunOptions) {

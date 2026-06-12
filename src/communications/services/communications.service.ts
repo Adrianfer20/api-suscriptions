@@ -8,6 +8,7 @@ import { Message } from '../models/message.model';
 import type { Subscription } from '../../subscriptions/models/subscription.model';
 import notificationService from '../../notifications/notification.service';
 import { normalizePhone } from '../../utils/phone.util';
+import subscriptionService from '../../subscriptions/services/subscription.service';
 
 class CommunicationsService {
     // Helpers para colecciones Firestore
@@ -640,6 +641,73 @@ class CommunicationsService {
       phone: normalizedPhone, 
       subscriptionIds 
     };
+  }
+
+  async notifySubscriptionSuspended(period: any) {
+    if (!period || !period.subscriptionId) return { ok: false, message: 'Invalid period' };
+    try {
+      const subscription = await subscriptionService.getById(period.subscriptionId);
+      if (!subscription) return { ok: false, message: 'Subscription not found' };
+
+      const target = subscription.clientId || subscription.ownerId || '';
+      if (!target) return { ok: false, message: 'No notification target' };
+
+      await this.sendTemplate(target, 'subscription_suspended_notice_2v', {
+        name: 'Cliente',
+        subscriptionLabel: `${subscription.plan || 'Plan'}`,
+        kitNumber: subscription.kitNumber || 'N/A'
+      });
+
+      return { ok: true };
+    } catch (err: any) {
+      console.error('[Communications] notifySubscriptionSuspended failed', err?.message || err);
+      return { ok: false, message: String(err?.message || err) };
+    }
+  }
+
+  async notifyBillingPeriodPaid(period: any) {
+    if (!period || !period.subscriptionId) return { ok: false, message: 'Invalid period' };
+    try {
+      const subscription = await subscriptionService.getById(period.subscriptionId);
+      if (!subscription) return { ok: false, message: 'Subscription not found' };
+
+      const target = subscription.clientId || subscription.ownerId || '';
+      if (!target) return { ok: false, message: 'No notification target' };
+
+      // Template name is a placeholder; keep notifications lightweight
+      await this.sendTemplate(target, 'subscription_paid_receipt_2v', {
+        name: 'Cliente',
+        amount: period.amount || 'N/A',
+        dueDate: period.dueDate
+      });
+
+      return { ok: true };
+    } catch (err: any) {
+      console.error('[Communications] notifyBillingPeriodPaid failed', err?.message || err);
+      return { ok: false, message: String(err?.message || err) };
+    }
+  }
+
+  async notifyBillingPeriodOverdue(period: any) {
+    if (!period || !period.subscriptionId) return { ok: false, message: 'Invalid period' };
+    try {
+      const subscription = await subscriptionService.getById(period.subscriptionId);
+      if (!subscription) return { ok: false, message: 'Subscription not found' };
+
+      const target = subscription.clientId || subscription.ownerId || '';
+      if (!target) return { ok: false, message: 'No notification target' };
+
+      await this.sendTemplate(target, 'subscription_overdue_notice_2v', {
+        name: 'Cliente',
+        dueDate: period.dueDate,
+        daysLate: period.daysLate || 0
+      });
+
+      return { ok: true };
+    } catch (err: any) {
+      console.error('[Communications] notifyBillingPeriodOverdue failed', err?.message || err);
+      return { ok: false, message: String(err?.message || err) };
+    }
   }
 
   /**

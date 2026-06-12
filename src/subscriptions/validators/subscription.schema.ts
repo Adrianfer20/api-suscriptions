@@ -40,7 +40,7 @@ export const createSubscriptionSchema = z
     cycleDay: cycleDaySchema.optional(),
     passwordSub: z.string().trim().min(1).optional(),
     kitNumber: z.string().trim().min(1).optional(),
-    country: z.string().trim().min(1).optional()
+    country: z.string().trim().min(1)
   })
   .strict()
   .refine((data) => Boolean(data.ownerId || data.clientId), {

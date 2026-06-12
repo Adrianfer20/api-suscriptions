@@ -22,6 +22,8 @@ import { startDailyAutomationJob } from './automation/jobs/daily.job';
 import meRoutes from './me/routes/me.routes';
 import adminSubscriptionsRoutes from './admins/routes/subscriptions.admin.routes';
 
+import './events/registerEventListeners';
+
 const app = express();
 const port = PORT;
 
@@ -156,3 +158,44 @@ if (require.main === module) {
 }
 
 export default app;
+
+// Graceful shutdown handlers for production
+async function gracefulShutdown(signal: string) {
+  try {
+    console.info(`[shutdown] Received ${signal}, shutting down...`);
+    // Stop automation job if running
+    try {
+      // Import lazily to avoid circular deps in some test setups
+      const { stopDailyAutomationJob } = await import('./automation/jobs/daily.job');
+      stopDailyAutomationJob();
+      console.info('[shutdown] Daily automation job stopped');
+    } catch (e: any) {
+      console.warn('[shutdown] Failed to stop daily job or not initialized', e?.message || e);
+    }
+
+    // Try to delete firebase admin app if initialized
+    try {
+      if (firebaseAdmin && typeof firebaseAdmin.app === 'function') {
+        const appInst = firebaseAdmin.app();
+        if (appInst && typeof appInst.delete === 'function') {
+          await appInst.delete();
+          console.info('[shutdown] Firebase Admin app deleted');
+        }
+      }
+    } catch (e: any) {
+      console.warn('[shutdown] Error while shutting down Firebase Admin', e?.message || e);
+    }
+
+    // Allow process to exit gracefully
+    setTimeout(() => {
+      console.info('[shutdown] Exiting process');
+      process.exit(0);
+    }, 1000).unref();
+  } catch (err: any) {
+    console.error('[shutdown] Unexpected error during shutdown', err?.message || err);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
