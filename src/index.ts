@@ -10,12 +10,17 @@ import { randomUUID } from 'crypto';
 import authRoutes from './auth/routes/auth.routes';
 import clientsRoutes from './clients/routes/client.routes';
 import adminsRoutes from './admins/routes/admin.routes';
+import adminClientsRoutes from './admins/routes/clients.admin.routes';
 import subscriptionsRoutes from './subscriptions/routes/subscription.routes';
 import communicationsRoutes from './communications/routes/communications.routes';
 import notificationRoutes from './notifications/routes/notification.routes';
 import automationRoutes from './automation/routes/automation.routes';
 import { paymentRoutes } from './payments/routes';
+import billingPeriodRoutes from './billingPeriods/routes/billingPeriod.routes';
+import dashboardRoutes from './dashboard/routes/dashboard.routes';
 import { startDailyAutomationJob } from './automation/jobs/daily.job';
+import meRoutes from './me/routes/me.routes';
+import adminSubscriptionsRoutes from './admins/routes/subscriptions.admin.routes';
 
 const app = express();
 const port = PORT;
@@ -96,6 +101,12 @@ if (process.env.NODE_ENV === 'development') {
 // Mount auth module
 app.use('/auth', authRoutes);
 
+// Mount self-service user module
+app.use('/me', meRoutes);
+
+// Mount admin clients management
+app.use('/admin/clients', adminClientsRoutes);
+
 // Mount clients module
 app.use('/clients', clientsRoutes);
 
@@ -111,11 +122,20 @@ app.use('/communications', communicationsRoutes);
 // Mount notifications module
 app.use('/notifications', notificationRoutes);
 
+// Mount admin subscriptions module
+app.use('/admin/subscriptions', adminSubscriptionsRoutes);
+
 // Mount automation module
 app.use('/automation', automationRoutes);
 
+// Mount billing periods module
+app.use('/billing-periods', billingPeriodRoutes);
+
 // Mount payments module
 app.use('/payments', paymentRoutes);
+
+// Mount dashboard module
+app.use('/dashboard', dashboardRoutes);
 
 import errorHandler from './middlewares/errorHandler';
 

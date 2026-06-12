@@ -9,6 +9,10 @@ class SubscriptionController {
   async create(req: Request, res: Response) {
     try {
       const data = req.validatedData as CreateSubscriptionInput;
+      // If an authenticated client creates subscription, enforce ownership
+      if (req.user && req.user.role === 'client') {
+        data.clientId = req.user.uid;
+      }
       const sub = await subscriptionService.create(data);
       return res.status(201).json({ ok: true, data: sub });
     } catch (err: any) {
@@ -26,6 +30,12 @@ class SubscriptionController {
     try {
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
       const startAfter = typeof req.query.startAfter === 'string' ? req.query.startAfter : undefined;
+      // If client requests list, return only their subscriptions
+      if (req.user && req.user.role === 'client') {
+        const clientUid = req.user.uid;
+        const subs = await subscriptionService.listByClient(clientUid, limit, startAfter);
+        return res.json({ ok: true, data: subs });
+      }
       const subs = await subscriptionService.list(limit, startAfter);
       return res.json({ ok: true, data: subs });
     } catch (err: any) {
@@ -39,6 +49,19 @@ class SubscriptionController {
       const id = String(req.params.id);
       const sub = await subscriptionService.getById(id);
       if (!sub) return res.status(404).json({ ok: false, message: 'Not found' });
+      // If client requesting, ensure ownership
+      if (req.user && req.user.role === 'client') {
+        const clientUid = req.user.uid;
+        // Accept either client doc id or uid stored in subscription.clientId
+        if (sub.clientId !== clientUid) {
+          // try resolving client's doc id
+          const client = await require('../../clients/services/client.service').default.getById(clientUid);
+          const clientDocId = client ? (client as any).id : null;
+          if (!clientDocId || sub.clientId !== clientDocId) {
+            return res.status(403).json({ ok: false, message: 'Forbidden' });
+          }
+        }
+      }
       return res.json({ ok: true, data: sub });
     } catch (err: any) {
       return res.status(500).json({ ok: false, message: 'Unable to fetch subscription' });

@@ -7,15 +7,18 @@ export type SubscriptionStatus =
 
 export interface Subscription {
   id?: string;
-  clientId: string; // either client doc id or client.uid
-  startDate: string; // ISO date yyyy-mm-dd
-  cutDate: string; // ISO date yyyy-mm-dd
+  ownerId?: string;
+  clientId?: string; // legacy compatibility
+  startDate?: string; // ISO date yyyy-mm-dd
   plan: Plan;
-  amount: string; // currency string (e.g. "$50")
+  amount: number | string; // numeric amount preferred; strings supported for legacy records
   kitNumber?: string; // e.g. "KIT4M01422983C2H" or "Valor No Disponible"
   passwordSub?: string;
+  cycleDay?: number;
+  cutDate?: string; // legacy alias for nextCutDate
+  nextCutDate?: string; // ISO date yyyy-mm-dd
   status: SubscriptionStatus;
-  country: string; // country abbreviation (e.g. "VES")
+  country?: string; // country abbreviation (e.g. "VES")
   createdAt?: any;
   updatedAt?: any;
 }

@@ -157,7 +157,7 @@ class AutomationService {
         result.notificationsSent++;
       } else {
         try {
-          await communicationsService.sendTemplate(sub.clientId, 'subscription_reminder_3days_2v', {
+          await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_reminder_3days_2v', {
             name: 'Cliente', 
             dueDate: sub.cutDate,
             kitNumber: sub.kitNumber || 'N/A'
@@ -193,7 +193,7 @@ class AutomationService {
         result.notificationsSent++;
       } else {
         try {
-          await communicationsService.sendTemplate(sub.clientId, 'subscription_cutoff_day_2v', {
+          await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_cutoff_day_2v', {
             name: 'Cliente',
             subscriptionLabel: this.subscriptionPlan(sub),
             cutoffDate: sub.cutDate,
@@ -268,7 +268,7 @@ class AutomationService {
           detail.actions.push('mark-suspended');
           // send suspended notice
           try {
-            await communicationsService.sendTemplate(sub.clientId, 'subscription_suspended_notice_2v', {
+            await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_suspended_notice_2v', {
               name: 'Cliente',
               subscriptionLabel: this.subscriptionPlan(sub),
               kitNumber: sub.kitNumber || 'N/A'
@@ -308,7 +308,7 @@ class AutomationService {
       } else {
         try {
           // Enviar recordatorio de suspensión próxima
-          await communicationsService.sendTemplate(sub.clientId, 'subscription_about_to_expire_reminder_2v', {
+          await communicationsService.sendTemplate(sub.clientId || sub.ownerId || '', 'subscription_about_to_expire_reminder_2v', {
             name: 'Cliente',
             dueDate: sub.cutDate,
             kitNumber: sub.kitNumber || 'N/A'

@@ -7,6 +7,7 @@ import { PaymentMethod, PaymentStatus, Currency } from '../types';
 export interface PaymentModel {
   id?: string;
   subscriptionId: string;
+  billingPeriodId?: string;
   amount: number;
   currency: Currency;
   date: any; // Firebase Timestamp
@@ -64,6 +65,7 @@ export const toFirestoreData = (payment: Partial<PaymentModel>): Record<string, 
   if (payment.verifiedAt !== undefined) data.verifiedAt = payment.verifiedAt;
   if (payment.verifiedBy !== undefined) data.verifiedBy = payment.verifiedBy;
   if (payment.notes !== undefined) data.notes = payment.notes;
+  if (payment.billingPeriodId !== undefined) data.billingPeriodId = payment.billingPeriodId;
   
   return data;
 };

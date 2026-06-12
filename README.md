@@ -1,285 +1,161 @@
-# API de Suscripciones (Node.js + Firebase Admin + Twilio)
+﻿# API de Suscripciones con Facturación por Períodos
 
-Backend modular en TypeScript para gestionar clientes, suscripciones y comunicaciones, con automatizaciones diarias basadas en reglas de negocio. Integra Firebase Admin (Auth + Firestore) y Twilio (WhatsApp) para notificaciones operativas.
+Backend modular en TypeScript para gestionar clientes, suscripciones, facturación periódica, pagos, comunicaciones y automatización. Integra Firebase Admin (Auth + Firestore) y Twilio para notificaciones operativas.
 
-## 1. Descripción General
+## Descripción General
 
-Esta API permite:
-- **Gestión de Clientes:** Crear, listar y actualizar información de clientes.
-- **Gestión de Suscripciones:** Crear nuevas suscripciones, listar, ver detalles y renovar suscripciones manualmente.
-- **Comunicaciones:** Enviar mensajes de plantilla (WhatsApp Template) y mensajes de texto libre, así como consultar el historial de conversaciones.
-- **Automatización:** Ejecutar trabajos diarios para verificar vencimientos y enviar recordatorios automáticamente.
+La API actualmente está diseñada alrededor de un dominio de facturación estructurado en:
+- `clients`: clientes finales.
+- `subscriptions`: contratos de servicio.
+- `billingPeriods`: períodos de facturación / facturas.
+- `payments`: registros de pagos verificados o rechazados.
+- `communications`: mensajería y conversaciones.
+- `automation`: reglas diarias de vencimiento y recordatorios.
+- `dashboard`: métricas operativas.
 
-## 2. Tecnologías Utilizadas
+### Arquitectura de relaciones
 
-- **Core:** Node.js, Express, TypeScript
-- **Base de Datos & Auth:** Firebase Admin SDK (Auth + Firestore)
-- **Mensajería:** Twilio (WhatsApp)
-- **Validación:** Zod (schemas), express-validator
-- **Seguridad:** helmet, cors, rate-limit, autenticación por token (Bearer)
-- **Tareas Programadas:** node-cron
+Cliente
+└── Suscripción
+      ├── BillingPeriod May-Jun
+      │      └── Payment
+      ├── BillingPeriod Jun-Jul
+      │      └── Payment
+      └── BillingPeriod Jul-Aug
 
-## 3. Configuración e Instalación
+### Evaluación rápida
 
-1.  Clonar el repositorio.
-2.  Instalar dependencias: `npm install`
-3.  Configurar variables de entorno en `.env` (puerto, credenciales de Firebase, Twilio, etc.).
-4.  Colocar las credenciales de servicio de Firebase en `config/firebase.json` (o configurar via variables de entorno).
+- **Estructura fuerte:** el código está bien separado en módulos por dominio.
+- **Factura simple y clara:** la lógica de `renew` ya no es el único camino; los pagos se registran en períodos de facturación.
+- **Buen control de roles:** `client` y `admin` tienen endpoints distintos y acceso restringido.
+- **Puntos a reforzar:** documentación de relaciones entre entidades, pruebas de integración para el flujo de facturación y consistencia en errores HTTP.
 
-Comandos rápidos:
+## Tecnologías
+
+- Node.js, Express, TypeScript
+- Firebase Admin SDK (Firestore + Auth)
+- Twilio
+- Zod
+- Helmet
+- CORS
+- express-rate-limit
+- node-cron
+
+## Instalación
 
 ```bash
-# Instalar dependencias
 npm install
+```
 
-# Ejecutar en modo desarrollo
+Configura tu entorno en `.env` y asegúrate de tener el servicio de Firebase Admin disponible en `config/firebase.json` o mediante variables de entorno.
+
+Comandos útiles:
+
+```bash
 npm run dev
-
-# Compilar
 npm run build
-
-# Ejecutar tests
 npm test
 ```
 
-## 4. Autenticación y Seguridad
+## Autenticación y Seguridad
 
-La mayoría de los endpoints están protegidos y requieren un token de Firebase Authentication.
-- **Header:** `Authorization: Bearer <ID_TOKEN>`
-- **Roles:** El sistema maneja roles en los Custom Claims del usuario (`admin`, `staff`, `client`).
-- **Header:** `Authorization: Bearer <ID_TOKEN>`
-- **Roles:** El sistema maneja roles en los Custom Claims del usuario. Actualmente el proyecto mantiene solo dos roles: `admin` y `client`.
-    - `admin`: Acceso total.
-    - `client`: Acceso restringido a sus propios datos.
-  
-  Nota: se ha eliminado el rol `staff` para simplificar la estructura de permisos.
+- Header: `Authorization: Bearer <ID_TOKEN>`
+- Roles principales: `admin`, `client`
+- `admin`: acceso total.
+- `client`: acceso a sus propios datos y funcionalidades de autoservicio.
 
-  Soporte de emails: el sistema acepta y preserva subdirecciones en Gmail (ej. `user+local@gmail.com`). La normalización de correo está configurada para no eliminar el `+local`.
-
-## 5. Referencia de API
+## Endpoints principales
 
 ### Health Check
-- **`GET /`**
-  - **Uso:** Verificar el estado del servicio y las conexiones externas.
-  - **Respuesta:**
-    ```json
-    {
-      "status": "ok",
-      "firebaseClient": "initialized",
-      "firebaseAdmin": "admin-initialized",
-      "twilio": "available"
-    }
-    ```
+- `GET /`
+  - Estado del servicio y conexiones externas.
 
-### Autenticación (`/auth`)
-- **`POST /auth/create`** (Admin)
-  - **Body:** `{ "email": "user@mail.com", "password": "pass", "role": "admin|client", "displayName": "Name" }`
-  - **Respuesta:** `{ "ok": true, "uid": "...", "role": "..." }`
-- **`GET /auth/me`** (Auth required)
-  - **Uso:** Obtener información del usuario actual.
-- **`GET /auth/user/:uid`** (Auth required)
-  - **Uso:** Obtener información pública básica de un usuario por UID.
+### Auth
+- `POST /auth/create` (admin)
+- `GET /auth/me`
+- `GET /auth/user/:uid`
 
 ### Clientes (`/clients`)
-Gestionado por administradores.
-- **`POST /clients`**
-  - **Body:** `{ "uid": "firebase-uid", "name": "Nombre", "phone": "+52...", "address": "..." }`
-  - **Nota:** Si se crea un cliente con un número de teléfono que ya tiene un historial de conversación (como "Desconocido"), el sistema vinculará automáticamente el chat existente al nuevo cliente, preservando el historial.
-  - **Respuesta:** `{ "ok": true, "data": { ...client } }`
-- **`GET /clients`**
-  - **Query:** `limit` (número), `startAfter` (cursor para paginación).
-  - **Respuesta:** Lista de clientes registrados.
-- **`GET /clients/:id`**
-  - **Uso:** Obtener detalle de un cliente.
-- **`PATCH /clients/:id`**
-  - **Body:** Campos a actualizar (`name`, `phone`, `address`).
+- `POST /clients`
+- `GET /clients`
+- `GET /clients/:id`
+- `PATCH /clients/:id`
 
 ### Administradores (`/admins`)
-Gestionado por administradores. Permite crear perfiles de admin en Firestore para que puedan tener suscripciones.
-- **`POST /admins`**
-  - **Body:** `{ "uid": "firebase-uid", "name": "Nombre", "phone": "+52...", "address": "...", "email": "admin@email.com", "notes": "..." }`
-  - **Respuesta:** `{ "ok": true, "data": { ...admin } }`
-- **`GET /admins`**
-  - **Query:** `limit` (número), `startAfter` (cursor para paginación).
-  - **Respuesta:** Lista de administradores registrados.
-- **`GET /admins/:id`**
-  - **Uso:** Obtener detalle de un administrador.
-- **`PATCH /admins/:id`**
-  - **Body:** Campos a actualizar (`name`, `phone`, `address`, `email`, `notes`, `active`).
-- **`DELETE /admins/:id`**
-  - **Uso:** Eliminar perfil de admin en Firestore (no elimina el usuario de Firebase Auth).
+- `POST /admins`
+- `GET /admins`
+- `GET /admins/:id`
+- `PATCH /admins/:id`
+- `DELETE /admins/:id`
 
-### Suscripciones (`/subscriptions`)
-Gestionado por administradores.
-- **`POST /subscriptions`**
-  - **Body:** 
-    ```json
-    {
-      "clientId": "client-id-or-admin-id",
-      "startDate": "YYYY-MM-DD",
-      "cutDate": "YYYY-MM-DD",
-      "plan": "Plan Name",
-      "amount": "$100.00",
-      "kitNumber": "KIT4M01422983C2H",
-      "country": "VES"
-    }
-    ```
-  - **Nota:** El campo `clientId` acepta tanto un ID de cliente como un ID de admin. El sistema busca primero en la colección `clients` y si no encuentra, busca en la colección `admins`.
-- **`GET /subscriptions`**
-  - **Query:** `limit`, `startAfter`.
-- **`GET /subscriptions/:id`**
-  - **Uso:** Ver detalles de una suscripción.
-- **`POST /subscriptions/:id/renew`** (Admin)
-  - **Uso:** Renovar una suscripción manualmente (extiende la fecha de corte al mes siguiente).
-  - **Validación:** Solo permite adelantar si la fecha actual es mayor al cutDate.
-  - **Error:** "La fecha de corte aún no ha vencido. No se puede adelantar."
-- **`DELETE /subscriptions/:id`**
-  - **Uso:** Eliminar permanentemente una suscripción (Admin).
-- **`PATCH /subscriptions/:id`**
-  - **Body:** Campos a actualizar (`startDate`, `cutDate`, `plan`, `amount`, `kitNumber`).
-    - **Nota:** No permite cambiar `status`. Para cambiar el estado use `PATCH /subscriptions/:id/status`.
-  - **Uso:** Actualizar información de la suscripción (no incluye cambio de `status`).
-- **`PATCH /subscriptions/:id/status`**
-  - **Body:** `{ "status": "active|about_to_expire|suspended|paused|cancelled" }`
-  - **Uso:** Cambiar únicamente el `status` de la suscripción. Requiere rol `admin`.
-  - **Nota:** Este es el único endpoint que puede modificar el `status`.
+### Suscripciones públicas (`/subscriptions`)
+- `GET /subscriptions/plans`
+- `GET /subscriptions` (client/admin)
+- `GET /subscriptions/:id` (client/admin)
 
-### Planes disponibles
+> Los clientes no crean suscripciones. La creación, modificación y suspensión se realiza desde `/admin/subscriptions`.
 
-El frontend puede obtener la lista de planes soportados por la API con el siguiente endpoint público:
+### Suscripciones admin (`/admin/subscriptions`)
+- `POST /admin/subscriptions`
+- `GET /admin/subscriptions`
+- `GET /admin/subscriptions/:id`
+- `PATCH /admin/subscriptions/:id`
+- `PATCH /admin/subscriptions/:id/status`
+- `POST /admin/subscriptions/:id/renew`
+  - **Depreciado**: devuelve `410 Gone`. Use la facturación por períodos y registros de pago.
 
-- **`GET /subscriptions/plans`**
-  - **Uso:** Devuelve un arreglo con los nombres de los planes que el usuario puede seleccionar al crear una suscripción.
-  - **Respuesta ejemplo:**
-    ```json
-    {
-      "ok": true,
-      "data": ["Itinerante Ilimitado", "Itinerante 100GB", "Residencial"]
-    }
-    ```
+### Períodos de facturación (`/billing-periods`)
+- `GET /billing-periods`
+- `GET /billing-periods/:id`
+- `PATCH /billing-periods/:id` (admin)
+- `DELETE /billing-periods/:id` (admin)
+- `POST /billing-periods/:id/pay` (admin/client)
 
-Recomendación para el frontend: cachear esta lista en cliente (por ejemplo en Redux o contexto) y usarla para poblar selects de creación/edición de suscripciones.
+> `POST /billing-periods/:id/pay` es la ruta canónica para registrar un pago. Internamente:
+> 1. crea el `Payment`;
+> 2. marca el `BillingPeriod` como `paid`;
+> 3. genera el siguiente `BillingPeriod`.
+> 
+> El módulo `/payments` se usa principalmente para consulta y administración de estado.
+
+### Pagos (`/payments`)
+- `GET /payments`
+- `GET /payments/stats` (admin)
+- `GET /payments/subscription/:subscriptionId`
+- `GET /payments/:id`
+- `PATCH /payments/:id/verify` (admin)
+- `PATCH /payments/:id/reject` (admin)
+- `PATCH /payments/:id/retry`
+
+> El registro de pagos se realiza preferentemente a través de `POST /billing-periods/:id/pay`.
+> `/payments` es principalmente un módulo de consulta e historial.
+
+### Dashboard (`/dashboard`)
+- `GET /dashboard`
+- `GET /dashboard/billing-periods`
 
 ### Comunicaciones (`/communications`)
-- **`GET /communications/conversations`** (Admin/Staff)
- - **`GET /communications/conversations`** (Admin only)
-  - **Uso:** Obtener lista de conversaciones (mezcla de Clientes y Desconocidos).
-  - **Identificadores:** Utiliza el campo `phone` como ID único.
-  - **Respuesta:** Objeto `Conversation` (ver Modelos).
-- **`GET /communications/messages/:id`**
-  - **Param :id:** Puede ser el `clientId` (viejo) o el `phoneNumber` (nuevo, recomendado para desconocidos).
-  - **Uso:** Ver historial de mensajes de una conversación.
-- **`POST /communications/conversations/:id/read`**
-  - **Param :id:** Puede ser el `clientId` o el `phoneNumber`.
-  - **Uso:** Marcar todos los mensajes entrantes como leídos.
-- **`POST /communications/send-template`** (Admin)
-  - **Body:** `{ "clientId": "...", "template": "nombre_plantilla", "templateData": { ... } }`
-  - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para enviar a prospectos.
-  - **Uso:** Enviar plantillas WhatsApp a Clientes o Prospectos.
-- **`POST /communications/send`** (Admin only)
-  - **Body:** `{ "clientId": "...", "body": "Texto libre..." }`
-  - **Nota:** El campo `clientId` acepta también un número de teléfono directo (ej. `+52...`) para chatear con prospectos.
-  - **Uso:** Responder con texto libre (requiere sesión abierta 24h).
-- **`POST /communications/subscriptions/link`** (Admin)
-  - **Body:** `{ "phone": "+521234567890", "subscriptionIds": ["sub1", "sub2"] }`
-  - **Uso:** Vincular múltiples suscripciones a una conversación (para clientes con varias antenas).
-- **`GET /communications/subscriptions/:phone`** (Admin only)
-  - **Param :phone:** Número de teléfono en formato E.164.
-  - **Uso:** Obtener lista de suscripciones vinculadas a un teléfono.
-- **`POST /communications/webhook`**
-  - **Uso:** Endpoint público (Twilio) para recibir mensajes. Crea una conversación "Desconocido" si el número no es cliente.
-- **`POST /communications/webhook-status`**
-  - **Uso:** Endpoint público (Twilio) para recibir status callbacks. Actualiza el estado del mensaje (sent, delivered, read, failed).
-  - **Twilio config:** Debes configurar la Status Callback URL en tu console de Twilio.
+- Envío de plantillas y mensajes libres.
+- Gestión de conversaciones vinculadas a números y suscripciones.
+- Gestión de webhooks de Twilio.
 
 ### Automatización (`/automation`)
-- **`POST /automation/run-daily`** (Admin)
-  - **Query:** `?dryRun=true` (opcional, para simular sin ejecutar cambios).
-  - **Body:** `{ "reason": "manual-check" }` (opcional).
-  - **Uso:** Ejecutar manualmente el job diario que verifica vencimientos y envía recordatorios.
+- Reglas diarias de vencimiento.
+- `POST /automation/run-daily`
 
-  - **Reglas de estado automáticas (resumen):**
-    - Al crear la suscripción: `active`.
-    - Si pasan 1 mes desde el `cutDate` sin renovación: el job marcará `about_to_expire` ("Por vencer").
-    - Si pasan 2 meses desde el `cutDate` sin renovación: el job marcará `suspended` ("Suspendida") y enviará el aviso correspondiente.
-    - `paused` y `cancelled` son estados que pueden establecerse por petición del cliente o por admin, y no son sobreescritos automáticamente por la regla de mora.
+## Flujo de facturación actual
 
-## 6. Modelos de Datos (Resumen)
+1. Se crea una `subscription`.
+2. Se genera automáticamente un `billingPeriod` inicial.
+3. Un pago registrado y verificado contra un `billingPeriod` cambia su estado a `paid`.
+4. Cuando el período queda pagado, se crea el siguiente período automáticamente.
+5. El `nextCutDate` de la suscripción se actualiza con la fecha del nuevo período.
 
-### Conversation
-Las conversaciones soportan múltiples suscripciones por teléfono (ej. cliente con varias antenas Starlink).
-```json
-{
-  "id": "+521234567890", 
-  "phone": "+521234567890",
-  "name": "Cliente Nombre" || "WhatsApp Profile",
-  "clientId": "firebase_doc_id" || null,
-  "prospect": true || false,
-  "unreadCount": 1,
-  "lastMessageAt": "Timestamp",
-  "lastMessageBody": "...",
-  "subscriptionIds": ["sub_id_1", "sub_id_2"] // Array de suscripciones vinculadas
-}
-```
+## Recomendaciones
 
-### Subscription
-- **Estado:** `active`, `about_to_expire`, `suspended`, `paused`, `cancelled`.
-- **Fechas:** Formato ISO `YYYY-MM-DD` para `startDate` y `cutDate`.
-- **Amount:** Cadena con formato moneda (ej. `$50.00`).
-
-### Client
-- **Phone:** Formato E.164 (ej. `+521234567890`).
-
-### Admin
-- **Phone:** Formato E.164 (ej. `+521234567890`).
-- **subscriptionIds:** Array de IDs de suscripciones asociadas al admin.
-
-### Message (WhatsApp)
-- **Estados:** `queued` → `sent` → `delivered` → `read` (o `failed`)
-- **Twilio callbacks:** El status se actualiza automáticamente vía webhook
-
-### Payment
-- **Estados:** `pending`, `verified`, `rejected`
-- **Métodos:** `bank_transfer`, `payment_link`, `cash`, `free`
-- **Moneda:** `USD` o `VES`
-
-### Formato de Fechas
-- **startDate, cutDate:** Formato `YYYY-MM-DD` (ISO sin hora)
-- **Zona horaria:** `America/Caracas` (Venezuela)
-
-### Lógica de cutDate con Pagos
-Cuando se verifica un pago:
-1. Se valida que el monto cubra el período actual
-2. Si está completo, el cutDate avanza 1 mes desde el corte actual
-3. El estado cambia a `active`
-
-### Renew Manual
-- **Endpoint:** `POST /subscriptions/:id/renew`
-- Solo permite adelantar si `hoy > cutDate`
-- Útil cuando hay pagos en efectivo no registrados
-
-## 7. Casos de Uso Especiales
-
-### Múltiples Suscripciones por Teléfono
-Un cliente puede tener múltiples antenas/suscripciones con el mismo número de teléfono. El sistema:
-1. Vincula automáticamente las suscripciones al crear (`subscriptionIds` en Conversation)
-2. Incluye `kitNumber` en todas las notificaciones para identificar qué antena
-3. Permite vincular suscripciones existentes manualmente:
-   ```bash
-   POST /communications/subscriptions/link
-   {
-     "phone": "+584123456789",
-     "subscriptionIds": ["sub_id_1", "sub_id_2"]
-   }
-   ```
-
-## 8. Manejo de Errores
-
-Las respuestas de error siguen el formato:
-```json
-{
-  "ok": false,
-  "message": "Descripción del error",
-  "errors": [] // Opcional, detalles de validación
-}
-```
+- Priorizar la creación de tests que cubran:
+  - creación de suscripción + primer período automático.
+  - pago de período y creación del siguiente período.
+  - acceso de cliente vs admin.
+- Asegurar que los clientes solo puedan ver sus propias suscripciones y períodos relacionados.
+- Mantener el endpoint `renew` como compatibilidad solo hasta migrar completamente al flujo de `billingPeriods`.

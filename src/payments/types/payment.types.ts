@@ -15,6 +15,7 @@ export type Currency = 'USD' | 'VES' | 'USDT';
 export interface Payment {
   id: string;
   subscriptionId: string;
+  billingPeriodId?: string;
   amount: number;
   currency: Currency;
   date: Date;
@@ -37,6 +38,7 @@ export interface Payment {
 // DTO para crear un nuevo pago
 export interface CreatePaymentDTO {
   subscriptionId: string;
+  billingPeriodId?: string;
   amount: number;
   currency?: Currency;
   date: Date;

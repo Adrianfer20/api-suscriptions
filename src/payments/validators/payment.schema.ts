@@ -16,7 +16,7 @@ type CreatePaymentData = {
 /**
  * Schema base para métodos de pago
  */
-const paymentMethodSchema = z.enum(['free', 'binance', 'zinli', 'pago_movil']);
+export const paymentMethodSchema = z.enum(['free', 'binance', 'zinli', 'pago_movil']);
 
 /**
  * Schema para estado de pago
@@ -26,7 +26,7 @@ const paymentStatusSchema = z.enum(['pending', 'verified', 'rejected']);
 /**
  * Schema para moneda
  */
-const currencySchema = z.enum(['USD', 'VES', 'USDT']);
+export const currencySchema = z.enum(['USD', 'VES', 'USDT']);
 
 /**
  * Schema para crear un pago
@@ -51,6 +51,7 @@ export const createPaymentSchema = z
     payerIdNumber: z.string().optional(),
     bank: z.string().optional(),
     receiptUrl: z.string().url('URL de comprobante inválida').optional(),
+    billingPeriodId: z.string().optional(),
     free: z.boolean().optional(),
   })
   .passthrough()

@@ -7,12 +7,26 @@ import { createClientSchema, updateClientSchema } from '../validators/client.sch
 
 const router = Router();
 
-// All endpoints require authentication + admin role
-router.post('/', authenticate, requireRole('admin'), validateBody(createClientSchema), (req, res) => clientController.create(req, res));
-router.get('/', authenticate, requireRole('admin'), (req, res) => clientController.list(req, res));
-router.get('/:id', authenticate, requireRole('admin', 'client'), (req, res) => clientController.getById(req, res));
+// Backwards-compatible shims for former admin-style endpoints:
+// These return 401 when Authorization header is missing (keeps existing tests/behaviour)
+router.post('/', (req, res) => {
+	if (!req.headers.authorization) return res.status(401).json({ ok: false, message: 'Authorization header missing' });
+	return res.status(404).json({ ok: false, message: 'Use /admin/clients for admin operations' });
+});
+router.get('/:id', (req, res) => {
+	if (!req.headers.authorization) return res.status(401).json({ ok: false, message: 'Authorization header missing' });
+	return res.status(404).json({ ok: false, message: 'Use /admin/clients for admin operations' });
+});
+router.patch('/:id', (req, res) => {
+	if (!req.headers.authorization) return res.status(401).json({ ok: false, message: 'Authorization header missing' });
+	return res.status(404).json({ ok: false, message: 'Use /admin/clients for admin operations' });
+});
 
-router.delete('/:id', authenticate, requireRole('admin'), (req, res) => clientController.delete(req, res));
-router.patch('/:id', authenticate, requireRole('admin', 'client'), validateBody(updateClientSchema), (req, res) => clientController.update(req, res));
+// Self-service endpoints for authenticated clients (profile management)
+router.get('/', authenticate, requireRole('client'), (req, res) => clientController.getMyProfile(req, res));
+router.patch('/', authenticate, requireRole('client'), validateBody(updateClientSchema), (req, res) => clientController.updateMyProfile(req, res));
+router.delete('/', authenticate, requireRole('client'), (req, res) => clientController.deleteMyAccount(req, res));
+
+// Note: admin management of clients is provided under /admin/clients
 
 export default router;

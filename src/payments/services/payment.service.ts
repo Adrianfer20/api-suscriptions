@@ -133,7 +133,9 @@ class PaymentService {
     }
     
     // Parsear el monto de la suscripción (remover $ y convertir a número)
-    const monthlyAmount = parseFloat(subscription.amount?.replace(/[^0-9.-]/g, '') || '0');
+const monthlyAmount = typeof subscription.amount === 'number'
+        ? subscription.amount
+        : parseFloat(String(subscription.amount).replace(/[^0-9.-]/g, '') || '0');
     
     if (monthlyAmount <= 0) {
       return; // Si no tiene monto definido, no validar
@@ -182,7 +184,7 @@ class PaymentService {
   /**
    * Crea un nuevo pago en estado pending
    */
-  async create(data: CreatePaymentInput, userId: string): Promise<PaymentModel> {
+  async create(data: CreatePaymentInput, userId: string, autoVerify = false, verifierId?: string): Promise<PaymentModel> {
     // Verificar que la suscripción existe
     const subscriptionDoc = await this.subscriptionsCollection().doc(data.subscriptionId).get();
     if (!subscriptionDoc.exists) {
@@ -217,11 +219,12 @@ class PaymentService {
 
     const rawPaymentData = {
       subscriptionId: data.subscriptionId,
+      billingPeriodId: data.billingPeriodId,
       amount: data.amount,
       currency: data.currency || 'USD',
       date: data.date,
       method: data.method,
-      status: 'pending' as const,
+      status: autoVerify ? 'verified' as const : 'pending' as const,
       reference: data.reference,
       payerEmail,
       payerPhone: data.payerPhone,
@@ -231,6 +234,8 @@ class PaymentService {
       free: data.free,
       createdAt: now,
       createdBy: userId,
+      verifiedAt: autoVerify ? now : undefined,
+      verifiedBy: autoVerify ? (verifierId || userId) : undefined,
     };
 
     // Filtrar campos undefined/null para Firestore
@@ -397,7 +402,7 @@ class PaymentService {
       };
 
       const monthlyAmountValue = parseFloat(subscription?.amount?.replace(/[^0-9.-]/g, '') || '0');
-      const currentCutDate = subscription?.cutDate || '';
+      const currentCutDate = subscription?.cutDate || subscription?.nextCutDate || '';
       
       // Obtener pagos verificados del PERÍODO ACTUAL (desde último cutDate)
       const currentPeriodTotal = await this.getVerifiedPaymentsInCurrentPeriod(payment.subscriptionId, currentCutDate);

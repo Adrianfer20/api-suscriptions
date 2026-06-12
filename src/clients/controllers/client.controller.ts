@@ -68,6 +68,51 @@ class ClientController {
       return res.status(400).json({ ok: false, message: err?.message || 'Unable to update' });
     }
   }
+
+  async getMyProfile(req: Request, res: Response) {
+    try {
+      const uid = (req.user as any)?.uid;
+      if (!uid) return res.status(401).json({ ok: false, message: 'Unauthorized' });
+      const client = await clientService.getById(uid);
+      if (!client) return res.status(404).json({ ok: false, message: 'Client not found' });
+      return res.json({ ok: true, data: client });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, message: err?.message || 'Unable to fetch profile' });
+    }
+  }
+
+  async updateMyProfile(req: Request, res: Response) {
+    try {
+      const uid = (req.user as any)?.uid;
+      if (!uid) return res.status(401).json({ ok: false, message: 'Unauthorized' });
+      const patch = req.validatedData as UpdateClientInput;
+      const client = await clientService.getById(uid);
+      if (!client) return res.status(404).json({ ok: false, message: 'Client not found' });
+      const updated = await clientService.update((client as any).id as string, patch);
+      return res.json({ ok: true, data: updated });
+    } catch (err: any) {
+      return res.status(400).json({ ok: false, message: err?.message || 'Unable to update profile' });
+    }
+  }
+
+  async deleteMyAccount(req: Request, res: Response) {
+    try {
+      const uid = (req.user as any)?.uid;
+      if (!uid) return res.status(401).json({ ok: false, message: 'Unauthorized' });
+      const clientIds = await clientService.deleteByUid(uid);
+      if (!clientIds || clientIds.length === 0) return res.status(404).json({ ok: false, message: 'Client not found' });
+      if (firebaseAdmin && firebaseAdmin.auth) {
+        try {
+          await firebaseAdmin.auth().deleteUser(uid);
+        } catch (err) {
+          // ignore
+        }
+      }
+      return res.json({ ok: true, deleted: clientIds });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, message: err?.message || 'Unable to delete account' });
+    }
+  }
 }
 
 const clientController = new ClientController();

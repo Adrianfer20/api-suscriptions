@@ -13,33 +13,57 @@ const isoDateSchema = z
   .trim()
   .refine((value) => isValidIsoDate(value), { message: 'Invalid ISO date (YYYY-MM-DD)' });
 
-const amountSchema = z
-  .string()
-  .trim()
-  .refine((value) => /^\$\d+(?:\.\d{1,2})?$/.test(value), { message: 'Invalid amount format (e.g. $50 or $50.00)' });
+const amountSchema = z.union([
+  z.number().positive(),
+  z
+    .string()
+    .trim()
+    .refine((value) => /^\$?\d+(?:\.\d{1,2})?$/.test(value), {
+      message: 'Invalid amount format (e.g. 50, 50.00 or $50)'
+    })
+]);
+
+const cycleDaySchema = z.preprocess((value) => {
+  if (typeof value === 'string') return Number(value);
+  return value;
+}, z.number().int().min(1).max(31));
 
 export const createSubscriptionSchema = z
   .object({
-    clientId: z.string().trim().min(1),
-    startDate: isoDateSchema,
-    cutDate: isoDateSchema,
+    ownerId: z.string().trim().min(1).optional(),
+    clientId: z.string().trim().min(1).optional(),
+    startDate: isoDateSchema.optional(),
+    cutDate: isoDateSchema.optional(),
+    nextCutDate: isoDateSchema.optional(),
     plan: z.enum(['Itinerante Ilimitado', 'Itinerante 100GB', 'Residencial']),
     amount: amountSchema,
+    cycleDay: cycleDaySchema.optional(),
     passwordSub: z.string().trim().min(1).optional(),
     kitNumber: z.string().trim().min(1).optional(),
-    country: z.string().trim().min(1)
+    country: z.string().trim().min(1).optional()
   })
-  .strict();
+  .strict()
+  .refine((data) => Boolean(data.ownerId || data.clientId), {
+    message: 'ownerId or clientId is required',
+    path: ['ownerId']
+  })
+  .refine((data) => Boolean(data.nextCutDate || data.cutDate || data.startDate), {
+    message: 'nextCutDate, cutDate or startDate is required',
+    path: ['nextCutDate']
+  });
 
 export const updateSubscriptionSchema = z
   .object({
     startDate: isoDateSchema.optional(),
     cutDate: isoDateSchema.optional(),
+    nextCutDate: isoDateSchema.optional(),
     plan: z.enum(['Itinerante Ilimitado', 'Itinerante 100GB', 'Residencial']).optional(),
     amount: amountSchema.optional(),
+    cycleDay: cycleDaySchema.optional(),
     kitNumber: z.string().trim().min(1).optional(),
     passwordSub: z.string().trim().min(1).optional(),
-    country: z.string().trim().min(1).optional()
+    country: z.string().trim().min(1).optional(),
+    status: z.enum(['active', 'about_to_expire', 'suspended', 'paused', 'cancelled']).optional()
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, {

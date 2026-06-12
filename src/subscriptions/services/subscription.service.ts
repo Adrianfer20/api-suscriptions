@@ -3,6 +3,7 @@ import type { firestore } from 'firebase-admin';
 import { Subscription } from '../models/subscription.model';
 import { addMonthsTZ, startOfDayTZ } from '../utils/date.util';
 import communicationsService from '../../communications/services/communications.service';
+import billingPeriodService from '../../billingPeriods/services/billingPeriod.service';
 
 class SubscriptionService {
   private collection() {
@@ -20,14 +21,27 @@ class SubscriptionService {
     return firebaseAdmin.firestore().collection('admins');
   }
 
-  async create(data: Pick<Subscription, 'clientId' | 'startDate' | 'cutDate' | 'plan' | 'amount' | 'passwordSub' | 'kitNumber'>) {
-    let clientDoc = await this.clientsCollection().doc(data.clientId).get();
+  private parseAmount(amount: string | number | undefined): number {
+    if (typeof amount === 'number') return amount;
+    if (typeof amount === 'string') {
+      const parsed = parseFloat(amount.replace(/[^0-9.-]/g, ''));
+      if (Number.isNaN(parsed)) throw new Error('Invalid amount');
+      return parsed;
+    }
+    throw new Error('Amount is required');
+  }
+
+  async create(data: Pick<Subscription, 'clientId' | 'ownerId' | 'startDate' | 'cutDate' | 'nextCutDate' | 'plan' | 'amount' | 'passwordSub' | 'kitNumber' | 'country' | 'cycleDay'>) {
+    const lookupId = data.ownerId || data.clientId;
+    if (!lookupId) throw new Error('Client or Admin not found');
+
+    let clientDoc = await this.clientsCollection().doc(lookupId).get();
     let clientExists = clientDoc.exists;
     let clientPhone = '';
     let userType: 'client' | 'admin' = 'client';
-    
+
     if (!clientExists) {
-      const q = await this.clientsCollection().where('uid', '==', data.clientId).limit(1).get();
+      const q = await this.clientsCollection().where('uid', '==', lookupId).limit(1).get();
       if (!q.empty) {
         clientDoc = q.docs[0];
         clientExists = true;
@@ -35,11 +49,11 @@ class SubscriptionService {
     }
 
     if (!clientExists) {
-      let adminDoc = await this.adminsCollection().doc(data.clientId).get();
+      let adminDoc = await this.adminsCollection().doc(lookupId).get();
       let adminExists = adminDoc.exists;
       
       if (!adminExists) {
-        const qAdmin = await this.adminsCollection().where('uid', '==', data.clientId).limit(1).get();
+        const qAdmin = await this.adminsCollection().where('uid', '==', lookupId).limit(1).get();
         if (!qAdmin.empty) {
           adminDoc = qAdmin.docs[0];
           adminExists = true;
@@ -52,33 +66,53 @@ class SubscriptionService {
         userType = 'admin';
       }
     }
-    
+
     if (!clientExists) throw new Error('Client or Admin not found');
-    
+
     const userData = clientDoc.data();
     clientPhone = userData?.phone || '';
 
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
     const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
-    // Default status is always active per business rule: service is already active when subscription is created
     const status = 'active';
 
+    const nextCutDate = data.nextCutDate || data.cutDate || data.startDate;
+    if (!nextCutDate) throw new Error('nextCutDate, cutDate or startDate is required');
+
     const docRef = await this.collection().add({
-      clientId: data.clientId,
-      startDate: data.startDate,
-      cutDate: data.cutDate,
+      ownerId: data.ownerId || data.clientId,
+      clientId: data.clientId || null,
+      startDate: data.startDate || null,
       plan: data.plan,
-      amount: data.amount,
+      amount: this.parseAmount(data.amount),
+      cycleDay: data.cycleDay || null,
+      cutDate: nextCutDate,
+      nextCutDate,
       passwordSub: data.passwordSub || null,
       kitNumber: (data as any).kitNumber || 'Valor No Disponible',
       status,
-        country: (data as any).country,
+      country: data.country || null,
       createdAt: now,
       updatedAt: now
     });
     const snap = await docRef.get();
     const newSubscription = { id: docRef.id, ...(snap.data() as any) } as Subscription;
-    
+
+    if (data.amount !== undefined) {
+      try {
+        await billingPeriodService.create({
+          subscriptionId: newSubscription.id!,
+          periodStart: addMonthsTZ(nextCutDate, -1),
+          periodEnd: nextCutDate,
+          dueDate: nextCutDate,
+          amount: this.parseAmount(data.amount),
+          status: 'pending'
+        });
+      } catch (err) {
+        console.warn('Failed to create initial billing period:', err);
+      }
+    }
+
     if (userType === 'admin') {
       try {
         await this.adminsCollection().doc(clientDoc.id).update({
@@ -88,8 +122,7 @@ class SubscriptionService {
         console.warn('Failed to add subscriptionId to admin subscriptionIds:', err);
       }
     }
-    
-    // Link subscription to conversation if client has phone
+
     if (clientPhone && communicationsService) {
       try {
         await communicationsService.linkSubscriptionsToConversation(clientPhone, [docRef.id]);
@@ -97,7 +130,7 @@ class SubscriptionService {
         console.warn('Failed to link subscription to conversation:', err);
       }
     }
-    
+
     return newSubscription;
   }
 
@@ -115,6 +148,37 @@ class SubscriptionService {
     return snaps.docs.map((d: firestore.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) } as Subscription));
   }
 
+  async listByClient(clientUidOrId: string, limit?: number, startAfterId?: string) {
+    // Try to resolve client doc id from uid
+    let clientDocId: string | null = null;
+    const clientSnap = await this.clientsCollection().where('uid', '==', clientUidOrId).limit(1).get();
+    if (!clientSnap.empty) clientDocId = clientSnap.docs[0].id;
+
+    const candidates: string[] = [];
+    if (clientDocId) candidates.push(clientDocId);
+    if (clientUidOrId) candidates.push(clientUidOrId);
+
+    let query: any;
+    if (candidates.length === 0) {
+      // no client resolved
+      return [];
+    } else if (candidates.length === 1) {
+      query = this.collection().where('clientId', '==', candidates[0]).orderBy('createdAt', 'desc');
+    } else {
+      // Firestore supports 'in' for equality matching
+      query = this.collection().where('clientId', 'in', candidates).orderBy('createdAt', 'desc');
+    }
+
+    if (startAfterId) {
+      const cursorDoc = await this.collection().doc(startAfterId).get();
+      if (!cursorDoc.exists) throw new Error('Invalid cursor');
+      query = query.startAfter(cursorDoc);
+    }
+    if (limit && Number.isInteger(limit) && limit > 0) query = query.limit(limit);
+    const snaps = await query.get();
+    return snaps.docs.map((d: firestore.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) } as Subscription));
+  }
+
   async getById(id: string) {
     const doc = await this.collection().doc(id).get();
     if (!doc.exists) return null;
@@ -123,7 +187,17 @@ class SubscriptionService {
 
   async update(id: string, patch: Partial<Subscription>) {
     if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
-    const data: any = { ...patch, updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp() };
+    const data: any = { ...patch };
+
+    if (patch.amount !== undefined) {
+      data.amount = this.parseAmount(patch.amount);
+    }
+    if (patch.nextCutDate || patch.cutDate) {
+      data.cutDate = patch.nextCutDate || patch.cutDate;
+      data.nextCutDate = patch.nextCutDate || patch.cutDate;
+    }
+
+    data.updatedAt = firebaseAdmin.firestore.FieldValue.serverTimestamp();
     await this.collection().doc(id).update(data);
     const doc = await this.collection().doc(id).get();
     return { id: doc.id, ...(doc.data() as any) } as Subscription;
